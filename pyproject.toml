@@ -1,0 +1,61 @@
+[project]
+name = "return-architecture"
+version = "0.1.0"
+description = "Local agent runtime for relational, long-term, local AI — your own agent on your own machine, with continuity and intentional friction by design."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Thea Borch", email = "thea@theborch.com" },
+]
+keywords = [
+    "ai",
+    "agent",
+    "anthropic",
+    "claude",
+    "openai",
+    "mcp",
+    "telegram",
+    "local-first",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Environment :: Console",
+    "Intended Audience :: End Users/Desktop",
+    "Operating System :: MacOS",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Communications :: Chat",
+]
+dependencies = [
+    "typer>=0.12.0",
+    "pydantic>=2.6.0",
+    "tomli-w>=1.0.0",
+    "anthropic>=0.40.0",
+    "openai>=1.40.0",
+    "chromadb>=0.5.0",
+    "python-telegram-bot>=21.0",
+    "apscheduler>=3.10.0",
+    "mcp>=1.0.0",
+    "trafilatura>=1.12.0",
+    "streamlit>=1.36.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/Theapolar/return-architecture"
+Repository = "https://github.com/Theapolar/return-architecture"
+Issues = "https://github.com/Theapolar/return-architecture/issues"
+
+[project.scripts]
+return-architecture = "return_architecture.cli:app"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["return_architecture"]

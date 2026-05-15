@@ -1,0 +1,27 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+.env.*
+dist/
+build/
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+.DS_Store
+
+# uv — keep uv.lock tracked for reproducible dev installs
+.python-version
+
+# IDE
+.idea/
+.vscode/
+
+# Local install / dev data — never commit these
+secrets.toml
+*.secrets.toml
+agents/
+
+# Logs / runtime artefacts inside the source tree
+*.log
