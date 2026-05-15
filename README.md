@@ -44,17 +44,28 @@ Some terminal comfort is required — you'll run commands and edit a couple of c
 
 ## Install (macOS)
 
-Requires Python 3.11–3.13 and an Anthropic or OpenAI API key.
+You'll need an Anthropic or OpenAI API key. Python is installed automatically by the installer if you don't have a compatible version.
+
+**One-line install:**
 
 ```bash
-# Install uv (handles Python + virtualenv) if you don't have it
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# Install Return Architecture from this repo via pipx
-pipx install git+https://github.com/Theapolar/return-architecture
+curl -sSL https://raw.githubusercontent.com/Theapolar/return-architecture/main/install.sh | sh
 ```
 
-If you don't have `pipx`, install it with `brew install pipx` (Homebrew) or `python3 -m pip install --user pipx`, then `pipx ensurepath`.
+This installs [uv](https://docs.astral.sh/uv/) (a fast Python manager) if needed, then installs Return Architecture as an isolated CLI tool. Takes 1–2 minutes due to dependencies like ChromaDB.
+
+**Manual install** (if you'd rather not pipe a script into your shell):
+
+```bash
+# Install uv first if you don't have it: https://docs.astral.sh/uv/getting-started/installation/
+uv tool install --from git+https://github.com/Theapolar/return-architecture return-architecture
+```
+
+Or via pipx:
+
+```bash
+pipx install git+https://github.com/Theapolar/return-architecture
+```
 
 ## First run
 
