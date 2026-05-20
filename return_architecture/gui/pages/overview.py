@@ -29,7 +29,8 @@ def render() -> None:
         st.subheader("Identity")
         st.write(f"**Provider**: {model_section.get('provider', '—')}")
         st.write(f"**Model**: {model_section.get('name', '—')}")
-        st.write(f"**Max tokens per turn**: {model_section.get('max_tokens', '—')}")
+        if model_section.get("provider") == "anthropic":
+            st.write(f"**Max tokens per turn**: {model_section.get('max_tokens', '—')}")
         silence = behavior_section.get("silence_allowed", True)
         st.write(f"**Silence allowed**: {'yes' if silence else 'no'}")
 

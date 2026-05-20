@@ -58,13 +58,21 @@ def render() -> None:
         help=MODEL_HINTS.get(new_provider, ""),
         key=f"_model_{slug}",
     )
-    new_max_tokens = st.number_input(
-        "Max tokens per turn",
-        min_value=64, max_value=200_000,
-        value=int(model_section.get("max_tokens", 4096)),
-        step=256,
-        key=f"_maxtok_{slug}",
-    )
+    if new_provider == "anthropic":
+        new_max_tokens = st.number_input(
+            "Max tokens per turn",
+            min_value=64, max_value=200_000,
+            value=int(model_section.get("max_tokens", 4096)),
+            step=256,
+            key=f"_maxtok_{slug}",
+            help="Anthropic's API requires a per-turn output cap. 4096 is a sensible default for chat.",
+        )
+    else:
+        new_max_tokens = int(model_section.get("max_tokens", 4096))
+        st.caption(
+            "OpenAI uses its own per-model output defaults — no cap is set from "
+            "here. See [docs/configuration.md](https://github.com/Theapolar/return-architecture/blob/main/docs/configuration.md)."
+        )
 
     st.markdown("**Temperature**")
     st.caption(
