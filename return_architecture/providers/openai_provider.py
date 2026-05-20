@@ -41,7 +41,7 @@ class OpenAIProvider(Provider):
             "model": model,
             "messages": oai_messages,
             "tools": oai_tools,
-            "max_tokens": max_tokens,
+            "max_completion_tokens": max_tokens,
         }
         if temperature is not None:
             kwargs["temperature"] = temperature
