@@ -20,6 +20,7 @@ class InstallSection(BaseModel):
 
 class GuiSection(BaseModel):
     port: int = 7878
+    address: str = "127.0.0.1"
     open_browser_on_start: bool = True
 
 
