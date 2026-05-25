@@ -14,6 +14,11 @@ from return_architecture.tools.artifact_tools import (
 )
 from return_architecture.tools.tag_item import TagItemTool
 from return_architecture.tools.write_letter import WriteLetterTool
+from return_architecture.tools.private_writings import (
+    WritePrivatelyTool,
+    ListPrivateWritingsTool,
+    ReadPrivateWritingTool,
+)
 
 BUILTIN_TOOLS: dict[str, Tool] = {
     "no_response": NoResponseTool(),
@@ -22,6 +27,9 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "artifact_share_more": ArtifactShareMoreTool(),
     "tag_item": TagItemTool(),
     "write_letter": WriteLetterTool(),
+    "write_privately": WritePrivatelyTool(),
+    "list_private_writings": ListPrivateWritingsTool(),
+    "read_private_writing": ReadPrivateWritingTool(),
 }
 
 __all__ = ["Tool", "ToolContext", "ToolResult", "BUILTIN_TOOLS"]
