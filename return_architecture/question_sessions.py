@@ -295,7 +295,6 @@ def _reflect(
                 {"role": "system", "content": system},
                 {"role": "user",   "content": user_message},
             ],
-            max_tokens=max_tokens,
         )
         msg = resp.choices[0].message
         out: list[dict] = []
@@ -561,7 +560,6 @@ def _observer_text_call(
                 {"role": "system", "content": system},
                 {"role": "user",   "content": user_text},
             ],
-            max_tokens=max_tokens,
         )
         return (resp.choices[0].message.content or "").strip()
     raise ValueError(f"Unsupported provider: {provider}")
