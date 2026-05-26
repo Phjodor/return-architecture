@@ -401,9 +401,10 @@ def _step_install_service() -> None:
 
     st.subheader("Install the background service")
     st.write(
-        "This writes a launchd plist to `~/Library/LaunchAgents/` and starts "
-        "the daemon. The daemon runs Telegram + the scheduler in the "
-        "background, survives terminal closure, and auto-starts at login. "
+        "This installs the daemon as a background service "
+        "(launchd on macOS, systemd user unit on Linux) and starts it. "
+        "The daemon runs Telegram + the scheduler in the background, "
+        "survives terminal closure, and auto-starts at login. "
         "You can uninstall anytime from the Service page."
     )
 

@@ -1,4 +1,4 @@
-"""Service page — control the background launchd daemon."""
+"""Service page — control the background daemon (launchd on macOS, systemd user units on Linux)."""
 
 from __future__ import annotations
 
@@ -46,8 +46,8 @@ def _render_status(status: ra_service.ServiceStatus) -> None:
             st.warning("not loaded")
         st.markdown(f"**Label**: `{status.label}`")
     with cols[1]:
-        st.markdown(f"**Plist**: `{status.plist_path}`")
-        st.markdown(f"**Plist file**: {'exists' if status.plist_exists else 'missing'}")
+        st.markdown(f"**Service file**: `{status.service_file_path}`")
+        st.markdown(f"**File**: {'exists' if status.service_file_exists else 'missing'}")
 
 
 # ── Actions ───────────────────────────────────────────────────────────────
@@ -63,7 +63,7 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
         help=(
             "Already loaded — use Restart to apply config changes."
             if status.loaded
-            else "Write the plist and start the daemon."
+            else "Write the service file and start the daemon."
         ),
         key="_svc_install",
     ):
@@ -79,8 +79,8 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
         "Restart",
         disabled=not status.loaded,
         help=(
-            "Terminates the running daemon process; launchd respawns it "
-            "and the new daemon re-reads your config."
+            "Terminates the running daemon process; the service manager "
+            "respawns it and the new daemon re-reads your config."
             if status.loaded
             else "Service is not loaded — use Install."
         ),
@@ -94,12 +94,12 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
         except (RuntimeError, FileNotFoundError) as e:
             st.error(f"Restart failed: {e}")
 
-    can_uninstall = status.loaded or status.plist_exists
+    can_uninstall = status.loaded or status.service_file_exists
     if cols[2].button(
         "Uninstall",
         disabled=not can_uninstall,
         help=(
-            "Stops the daemon and removes the plist. Your config, memory, "
+            "Stops the daemon and removes the service file. Your config, memory, "
             "letters and items are NOT affected; reinstall any time."
             if can_uninstall
             else "Nothing to uninstall."
@@ -112,7 +112,7 @@ def _render_actions(slug: str, status: ra_service.ServiceStatus) -> None:
     if st.session_state.get("_confirm_uninstall"):
         st.warning(
             f"Uninstall the **{slug}** service? The daemon will stop running and "
-            "the plist will be removed. Your config, memory, items, letters, and "
+            "the service file will be removed. Your config, memory, items, letters, and "
             "artifacts are NOT affected — you can reinstall any time."
         )
         confirm_cols = st.columns([1, 1, 5])

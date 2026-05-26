@@ -237,14 +237,14 @@ def service_uninstall(slug: str = typer.Argument(..., help="Agent slug.")):
 
 @service_app.command("status")
 def service_status(slug: str = typer.Argument(..., help="Agent slug.")):
-    """Show whether the service is loaded, its PID, and the plist path."""
+    """Show whether the service is loaded, its PID, and the service file path."""
     try:
         st = ra_service.status(slug)
     except RuntimeError as e:
         typer.echo(f"Error: {e}", err=True)
         raise typer.Exit(1)
     typer.echo(f"label:       {st.label}")
-    typer.echo(f"plist:       {st.plist_path}  ({'exists' if st.plist_exists else 'missing'})")
+    typer.echo(f"file:        {st.service_file_path}  ({'exists' if st.service_file_exists else 'missing'})")
     typer.echo(f"loaded:      {'yes' if st.loaded else 'no'}")
     if st.pid is not None:
         typer.echo(f"pid:         {st.pid}")

@@ -1,11 +1,17 @@
-"""macOS launchd service control for the daemon.
+"""Service control for the background daemon.
 
-Writes a per-agent plist to ~/Library/LaunchAgents/ and uses launchctl to
-load and unload it. The plist points at the return-architecture binary in
-the current venv, sets RA_INSTALL_ROOT as an env var, and captures stdout
-and stderr to log files in the agent's folder.
+Manages a per-agent service that runs `return-architecture daemon <slug>`
+in the background, auto-starts at login, and respawns on crash.
 
-macOS only. Linux/Windows are detected and refused with a clear message.
+Two backends:
+
+- macOS: launchd. Per-agent plist in `~/Library/LaunchAgents/`,
+  controlled via `launchctl`.
+- Linux: systemd user units. Per-agent unit file in
+  `~/.config/systemd/user/`, controlled via `systemctl --user`.
+
+Public functions (`install`, `restart`, `uninstall`, `status`,
+`tail_logs`) dispatch to the right backend by platform.
 """
 
 from __future__ import annotations
@@ -20,24 +26,20 @@ from pathlib import Path
 from return_architecture import paths
 
 
-def _check_macos() -> None:
-    if platform.system() != "Darwin":
-        raise RuntimeError(
-            "service commands are macOS-only (uses launchd). "
-            "Linux support via systemd user units will arrive later."
-        )
+# ── Shared types & helpers ────────────────────────────────────────────────
 
-
-def _label(slug: str) -> str:
-    return f"com.returnarchitecture.{slug}.daemon"
-
-
-def _plist_path(slug: str) -> Path:
-    return Path.home() / "Library" / "LaunchAgents" / f"{_label(slug)}.plist"
+@dataclass
+class ServiceStatus:
+    label: str
+    service_file_path: Path
+    service_file_exists: bool
+    loaded: bool
+    pid: int | None
+    raw_output: str
 
 
 def _executable_path() -> Path:
-    """Return path to the return-architecture binary in the active venv."""
+    """Path to the return-architecture binary in the active venv."""
     return Path(sys.executable).parent / "return-architecture"
 
 
@@ -49,18 +51,90 @@ def stderr_log(slug: str) -> Path:
     return paths.agent_logs_dir(slug) / "daemon-stderr.log"
 
 
-@dataclass
-class ServiceStatus:
-    label: str
-    plist_path: Path
-    plist_exists: bool
-    loaded: bool
-    pid: int | None
-    raw_output: str
+def _unsupported() -> RuntimeError:
+    return RuntimeError(
+        f"service commands are not supported on {platform.system()}. "
+        "Supported: macOS (launchd), Linux (systemd user units)."
+    )
 
+
+# ── Public dispatch ───────────────────────────────────────────────────────
 
 def install(slug: str) -> Path:
-    _check_macos()
+    system = platform.system()
+    if system == "Darwin":
+        return _macos_install(slug)
+    if system == "Linux":
+        return _linux_install(slug)
+    raise _unsupported()
+
+
+def restart(slug: str) -> None:
+    system = platform.system()
+    if system == "Darwin":
+        return _macos_restart(slug)
+    if system == "Linux":
+        return _linux_restart(slug)
+    raise _unsupported()
+
+
+def uninstall(slug: str) -> None:
+    system = platform.system()
+    if system == "Darwin":
+        return _macos_uninstall(slug)
+    if system == "Linux":
+        return _linux_uninstall(slug)
+    raise _unsupported()
+
+
+def status(slug: str) -> ServiceStatus:
+    system = platform.system()
+    if system == "Darwin":
+        return _macos_status(slug)
+    if system == "Linux":
+        return _linux_status(slug)
+    raise _unsupported()
+
+
+def is_loaded(slug: str) -> bool:
+    system = platform.system()
+    if system == "Darwin":
+        return _macos_is_loaded(slug)
+    if system == "Linux":
+        return _linux_is_loaded(slug)
+    return False
+
+
+def tail_logs(slug: str, lines: int = 40) -> tuple[str, str]:
+    """Return (stdout_tail, stderr_tail). Platform-agnostic — both
+    backends write to the same agent log paths."""
+    return _tail_file(stdout_log(slug), lines), _tail_file(stderr_log(slug), lines)
+
+
+def _tail_file(path: Path, lines: int) -> str:
+    if not path.exists():
+        return ""
+    try:
+        result = subprocess.run(
+            ["tail", "-n", str(lines), str(path)],
+            capture_output=True, text=True, check=True,
+        )
+        return result.stdout
+    except subprocess.CalledProcessError:
+        return ""
+
+
+# ── macOS / launchd backend ───────────────────────────────────────────────
+
+def _macos_label(slug: str) -> str:
+    return f"com.returnarchitecture.{slug}.daemon"
+
+
+def _macos_plist_path(slug: str) -> Path:
+    return Path.home() / "Library" / "LaunchAgents" / f"{_macos_label(slug)}.plist"
+
+
+def _macos_install(slug: str) -> Path:
     exe = _executable_path()
     if not exe.exists():
         raise FileNotFoundError(
@@ -69,11 +143,11 @@ def install(slug: str) -> Path:
         )
 
     paths.agent_logs_dir(slug).mkdir(parents=True, exist_ok=True)
-    plist_path = _plist_path(slug)
+    plist_path = _macos_plist_path(slug)
     plist_path.parent.mkdir(parents=True, exist_ok=True)
 
     plist_content = _build_plist(
-        label=_label(slug),
+        label=_macos_label(slug),
         executable=str(exe),
         slug=slug,
         install_root=str(paths.install_root()),
@@ -85,18 +159,17 @@ def install(slug: str) -> Path:
     # If a previous version is already loaded, unload it first and wait for
     # launchd to actually release the service — bootstrap can fail with EIO
     # if the previous instance is still being torn down.
-    if is_loaded(slug):
-        _try_bootout(slug)
+    if _macos_is_loaded(slug):
+        _macos_try_bootout(slug)
         import time
         for _ in range(25):
-            if not is_loaded(slug):
+            if not _macos_is_loaded(slug):
                 break
             time.sleep(0.2)
 
     result = subprocess.run(
         ["launchctl", "bootstrap", f"gui/{os.getuid()}", str(plist_path)],
-        capture_output=True,
-        text=True,
+        capture_output=True, text=True,
     )
     if result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
@@ -107,35 +180,21 @@ def install(slug: str) -> Path:
     return plist_path
 
 
-def is_loaded(slug: str) -> bool:
-    """Cheaply check whether the service is currently registered with launchd."""
-    if platform.system() != "Darwin":
-        return False
+def _macos_is_loaded(slug: str) -> bool:
     proc = subprocess.run(
-        ["launchctl", "print", f"gui/{os.getuid()}/{_label(slug)}"],
+        ["launchctl", "print", f"gui/{os.getuid()}/{_macos_label(slug)}"],
         capture_output=True,
     )
     return proc.returncode == 0
 
 
-def restart(slug: str) -> None:
-    """Restart the running daemon in place.
-
-    Uses `launchctl kickstart -k`, which terminates the current daemon
-    process and lets launchd respawn it with the same plist. The new
-    daemon re-reads config files on startup, so this is the right call
-    after editing agent config / system prompt / schedules / tools.
-
-    Falls back to install() if the service isn't currently loaded.
-    """
-    _check_macos()
-    if not is_loaded(slug):
-        install(slug)
+def _macos_restart(slug: str) -> None:
+    if not _macos_is_loaded(slug):
+        _macos_install(slug)
         return
     result = subprocess.run(
-        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{_label(slug)}"],
-        capture_output=True,
-        text=True,
+        ["launchctl", "kickstart", "-k", f"gui/{os.getuid()}/{_macos_label(slug)}"],
+        capture_output=True, text=True,
     )
     if result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
@@ -145,22 +204,19 @@ def restart(slug: str) -> None:
         )
 
 
-def uninstall(slug: str) -> None:
-    _check_macos()
-    _try_bootout(slug)
-    plist_path = _plist_path(slug)
+def _macos_uninstall(slug: str) -> None:
+    _macos_try_bootout(slug)
+    plist_path = _macos_plist_path(slug)
     if plist_path.exists():
         plist_path.unlink()
 
 
-def status(slug: str) -> ServiceStatus:
-    _check_macos()
-    plist_path = _plist_path(slug)
-    label = _label(slug)
+def _macos_status(slug: str) -> ServiceStatus:
+    plist_path = _macos_plist_path(slug)
+    label = _macos_label(slug)
     proc = subprocess.run(
         ["launchctl", "print", f"gui/{os.getuid()}/{label}"],
-        capture_output=True,
-        text=True,
+        capture_output=True, text=True,
     )
     loaded = proc.returncode == 0
     pid: int | None = None
@@ -175,40 +231,17 @@ def status(slug: str) -> ServiceStatus:
                 break
     return ServiceStatus(
         label=label,
-        plist_path=plist_path,
-        plist_exists=plist_path.exists(),
+        service_file_path=plist_path,
+        service_file_exists=plist_path.exists(),
         loaded=loaded,
         pid=pid,
         raw_output=(proc.stdout if loaded else proc.stderr),
     )
 
 
-def tail_logs(slug: str, lines: int = 40) -> tuple[str, str]:
-    """Return (stdout_tail, stderr_tail)."""
-    out = _tail_file(stdout_log(slug), lines)
-    err = _tail_file(stderr_log(slug), lines)
-    return out, err
-
-
-def _tail_file(path: Path, lines: int) -> str:
-    if not path.exists():
-        return ""
-    try:
-        result = subprocess.run(
-            ["tail", "-n", str(lines), str(path)],
-            capture_output=True,
-            text=True,
-            check=True,
-        )
-        return result.stdout
-    except subprocess.CalledProcessError:
-        return ""
-
-
-def _try_bootout(slug: str) -> None:
-    """Best-effort unload; ignore errors if the service isn't loaded."""
+def _macos_try_bootout(slug: str) -> None:
     subprocess.run(
-        ["launchctl", "bootout", f"gui/{os.getuid()}/{_label(slug)}"],
+        ["launchctl", "bootout", f"gui/{os.getuid()}/{_macos_label(slug)}"],
         capture_output=True,
     )
 
@@ -251,4 +284,144 @@ def _build_plist(
     <string>{stderr_path}</string>
 </dict>
 </plist>
+"""
+
+
+# ── Linux / systemd-user backend ──────────────────────────────────────────
+
+def _linux_unit_name(slug: str) -> str:
+    return f"return-architecture-{slug}.service"
+
+
+def _linux_unit_path(slug: str) -> Path:
+    return Path.home() / ".config" / "systemd" / "user" / _linux_unit_name(slug)
+
+
+def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
+    result = subprocess.run(
+        ["systemctl", "--user", *args],
+        capture_output=True, text=True,
+    )
+    if check and result.returncode != 0:
+        msg = (result.stderr or result.stdout or "").strip()
+        raise RuntimeError(
+            f"systemctl --user {' '.join(args)} failed (exit {result.returncode})"
+            + (f": {msg}" if msg else "")
+        )
+    return result
+
+
+def _linux_install(slug: str) -> Path:
+    exe = _executable_path()
+    if not exe.exists():
+        raise FileNotFoundError(
+            f"Can't find return-architecture executable at {exe}. "
+            f"Run `uv sync` in the source repo, then try again."
+        )
+
+    paths.agent_logs_dir(slug).mkdir(parents=True, exist_ok=True)
+    unit_path = _linux_unit_path(slug)
+    unit_path.parent.mkdir(parents=True, exist_ok=True)
+    unit_path.write_text(
+        _build_systemd_unit(
+            slug=slug,
+            executable=str(exe),
+            install_root=str(paths.install_root()),
+            stdout_path=str(stdout_log(slug)),
+            stderr_path=str(stderr_log(slug)),
+        ),
+        encoding="utf-8",
+    )
+
+    unit = _linux_unit_name(slug)
+    _systemctl("daemon-reload")
+    _systemctl("enable", unit)
+    if _linux_is_active(slug):
+        _systemctl("restart", unit)
+    else:
+        _systemctl("start", unit)
+    return unit_path
+
+
+def _linux_is_active(slug: str) -> bool:
+    proc = _systemctl("is-active", _linux_unit_name(slug), check=False)
+    return proc.stdout.strip() == "active"
+
+
+def _linux_is_loaded(slug: str) -> bool:
+    return _linux_is_active(slug)
+
+
+def _linux_restart(slug: str) -> None:
+    unit = _linux_unit_name(slug)
+    if not _linux_unit_path(slug).exists():
+        _linux_install(slug)
+        return
+    _systemctl("restart", unit)
+
+
+def _linux_uninstall(slug: str) -> None:
+    unit = _linux_unit_name(slug)
+    # Best-effort stop and disable; ignore failures (e.g. unit not loaded).
+    _systemctl("stop", unit, check=False)
+    _systemctl("disable", unit, check=False)
+    unit_path = _linux_unit_path(slug)
+    if unit_path.exists():
+        unit_path.unlink()
+    _systemctl("daemon-reload", check=False)
+
+
+def _linux_status(slug: str) -> ServiceStatus:
+    unit = _linux_unit_name(slug)
+    unit_path = _linux_unit_path(slug)
+    proc = _systemctl(
+        "show", unit, "--no-page",
+        "--property=ActiveState,MainPID,SubState",
+        check=False,
+    )
+    props: dict[str, str] = {}
+    for line in proc.stdout.splitlines():
+        if "=" in line:
+            k, v = line.split("=", 1)
+            props[k] = v
+    active = props.get("ActiveState") == "active"
+    pid_raw = props.get("MainPID", "0")
+    try:
+        pid: int | None = int(pid_raw) if pid_raw and pid_raw != "0" else None
+    except ValueError:
+        pid = None
+    return ServiceStatus(
+        label=unit,
+        service_file_path=unit_path,
+        service_file_exists=unit_path.exists(),
+        loaded=active,
+        pid=pid,
+        raw_output=proc.stdout,
+    )
+
+
+def _build_systemd_unit(
+    *,
+    slug: str,
+    executable: str,
+    install_root: str,
+    stdout_path: str,
+    stderr_path: str,
+) -> str:
+    return f"""[Unit]
+Description=Return Architecture daemon for {slug}
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=RA_INSTALL_ROOT={install_root}
+ExecStart={executable} daemon {slug}
+Restart=on-failure
+RestartSec=60
+StandardOutput=append:{stdout_path}
+StandardError=append:{stderr_path}
+
+[Install]
+WantedBy=default.target
 """
