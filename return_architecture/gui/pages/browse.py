@@ -1,4 +1,4 @@
-"""Browse — letters, inbox, items, and question responses."""
+"""Browse — letters, inbox, items, question responses, and configurable file sections."""
 
 from __future__ import annotations
 
@@ -7,6 +7,7 @@ from pathlib import Path
 import streamlit as st
 
 from return_architecture import items as ra_items
+from return_architecture import paths
 from return_architecture import question_sessions as ra_qs
 from return_architecture.gui import helpers
 
@@ -19,9 +20,12 @@ def render() -> None:
 
     st.title(f"Browse — {slug}")
 
-    letters_tab, inbox_tab, items_tab, responses_tab = st.tabs([
-        "Letters", "Inbox", "Items", "Question responses",
-    ])
+    base_labels = ["Letters", "Inbox", "Items", "Question responses"]
+    file_sections = _load_file_sections(slug)
+    extra_labels = [s["title"] for s in file_sections]
+
+    all_tabs = st.tabs(base_labels + extra_labels)
+    letters_tab, inbox_tab, items_tab, responses_tab = all_tabs[:4]
 
     with letters_tab:
         _render_letters(slug)
@@ -31,6 +35,89 @@ def render() -> None:
         _render_items(slug)
     with responses_tab:
         _render_responses(slug)
+
+    for tab, section in zip(all_tabs[4:], file_sections):
+        with tab:
+            _render_file_section(slug, section)
+
+
+# ── File-section helpers ──────────────────────────────────────────────────
+
+
+def _load_file_sections(slug: str) -> list[dict]:
+    """Read [[browse.file_sections]] from the agent's config.toml.
+
+    Returns an empty list if the key is absent, so agents without this config
+    continue to show only the four built-in tabs unchanged.
+    """
+    cfg = helpers.load_agent_config_raw(slug)
+    browse = cfg.get("browse", {})
+    return browse.get("file_sections", [])
+
+
+def _render_file_section(slug: str, section: dict) -> None:
+    """Render one configured file section as a list of collapsible .md files."""
+    description = section.get("description", "")
+    raw_path = section.get("path", "")
+    if not raw_path:
+        st.warning("No `path` configured for this section.")
+        return
+
+    p = Path(raw_path)
+    if not p.is_absolute():
+        p = paths.agent_dir(slug) / p
+
+    if description:
+        st.caption(description)
+
+    if not p.exists():
+        st.info(f"Directory not found: `{p}`")
+        return
+
+    files = sorted(p.glob("*.md"), reverse=True)  # newest-first (date-prefixed names)
+    if not files:
+        st.info("No .md files here yet.")
+        return
+
+    for path in files:
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as e:
+            st.warning(f"Could not read `{path.name}`: {e}")
+            continue
+
+        meta, body = _parse_frontmatter(text)
+        title = str(meta.get("title", path.stem))
+        created = str(meta.get("created", ""))[:10]  # YYYY-MM-DD
+        tags = meta.get("tags", [])
+        tag_str = "  [" + ", ".join(str(t) for t in tags) + "]" if tags else ""
+        label = f"📓 {title}  ·  {created}{tag_str}"
+
+        with st.expander(label, expanded=False):
+            st.markdown(body)
+
+
+def _parse_frontmatter(text: str) -> tuple[dict, str]:
+    """Minimal YAML-like frontmatter parser — mirrors exploration_mcp.py."""
+    if not text.startswith("---\n"):
+        return {}, text
+    end = text.find("\n---\n", 4)
+    if end == -1:
+        return {}, text
+    fm_text = text[4:end]
+    body = text[end + 5:]
+    meta: dict = {}
+    for line in fm_text.splitlines():
+        if ": " not in line:
+            continue
+        key, _, val = line.partition(": ")
+        key, val = key.strip(), val.strip()
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1].strip()
+            meta[key] = [t.strip() for t in inner.split(",")] if inner else []
+        else:
+            meta[key] = val
+    return meta, body
 
 
 # ── Letters ───────────────────────────────────────────────────────────────
