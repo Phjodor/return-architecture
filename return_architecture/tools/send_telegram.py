@@ -18,6 +18,7 @@ from typing import Any
 import httpx
 
 from return_architecture import paths
+from return_architecture.memory import MemoryStore
 from return_architecture.tools.base import Tool, ToolContext, ToolResult
 
 
@@ -62,6 +63,18 @@ class SendToHumanTelegramTool(Tool):
 
         if not data.get("ok"):
             return ToolResult(content=f"Telegram API error: {data.get('description', 'unknown')}")
+
+        # Persist the outreach so it carries into future context. The message
+        # lives only in this tool call (not in the model's reply text), so the
+        # turn/ping storage path would otherwise never see it. The send already
+        # succeeded — a memory hiccup must not turn that into a reported failure.
+        try:
+            MemoryStore(context.slug).remember(
+                message, role="assistant", session_id=context.session_id
+            )
+        except Exception:
+            pass
+
         return ToolResult(content="Message sent to human via Telegram.")
 
 

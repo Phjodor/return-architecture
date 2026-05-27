@@ -17,6 +17,7 @@ from datetime import datetime
 from typing import Any
 
 from return_architecture import paths
+from return_architecture.memory import MemoryStore
 from return_architecture.tools.base import Tool, ToolContext, ToolResult
 
 
@@ -65,4 +66,16 @@ class WriteLetterTool(Tool):
         path = outbox / filename
         body = f"# {title}\n\n*Written {datetime.now().strftime('%Y-%m-%d %H:%M')}*\n\n{content}\n"
         path.write_text(body, encoding="utf-8")
+
+        # Persist the letter so the agent carries forward that it wrote it.
+        # File-write already succeeded; don't fail the tool on a memory hiccup.
+        try:
+            MemoryStore(context.slug).remember(
+                f"[Letter to the human — {title}]\n\n{content}",
+                role="assistant",
+                session_id=context.session_id,
+            )
+        except Exception:
+            pass
+
         return ToolResult(content=f"Letter '{title}' saved to outbox as {filename}.")
