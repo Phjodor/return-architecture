@@ -187,6 +187,34 @@ def get_all_responses_grouped(slug: str) -> dict[str, list[dict]]:
     return out
 
 
+def latest_session_block(slug: str) -> str | None:
+    """Format the most recent question session as a context block.
+
+    Pinned into the agent's context every turn so the latest reflection is
+    carried forward regardless of semantic recall. Returns None when the
+    agent has no recorded sessions yet.
+    """
+    grouped = get_all_responses_grouped(slug)
+    grouped.pop("", None)  # drop entries with no session id
+    if not grouped:
+        return None
+    # Session ids are "YYYYMMDD-HHMM", so lexical max is the most recent.
+    latest_sid = max(grouped)
+    entries = grouped[latest_sid]
+    if not entries:
+        return None
+
+    date = (entries[0].get("asked_at") or "")[:10] or latest_sid
+    lines: list[str] = []
+    for r in entries:
+        question = r.get("question", "")
+        if r.get("skipped"):
+            lines.append(f"— {question}\n  (skipped)")
+        else:
+            lines.append(f"— {question}\n  {r.get('response', '')}")
+    return f"Your most recent question session ({date}):\n\n" + "\n".join(lines)
+
+
 def get_responses_in_window(slug: str, days: int) -> list[dict]:
     """Return responses with asked_at within the last `days` days."""
     from datetime import timedelta
@@ -465,7 +493,7 @@ def _write_to_memory(
         if tc.get("name") != "log_answer":
             continue
         inputs = tc.get("input", {}) or {}
-        question = (inputs.get("question") or "").strip()
+        question = _normalize_question((inputs.get("question") or "").strip())
         answer = (inputs.get("answer") or "").strip()
         if not question or not answer:
             continue

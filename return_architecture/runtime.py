@@ -18,6 +18,7 @@ from typing import Any
 from return_architecture import config as cfg
 from return_architecture import logging as ralog
 from return_architecture import memory as ramem
+from return_architecture import question_sessions as qs
 from return_architecture.mcp_client import MCPError, MCPServer
 from return_architecture.providers import ImageContent, Message, Provider, ToolCall
 from return_architecture.providers.anthropic_provider import AnthropicProvider
@@ -137,7 +138,10 @@ def turn(
     })
 
     recalled = session.memory.recall(user_input, top_k=MEMORY_RECALL_TOP_K)
-    augmented_system = _augment_system_prompt(session.base_system_prompt, recalled)
+    pinned = qs.latest_session_block(session.slug)
+    augmented_system = _augment_system_prompt(
+        session.base_system_prompt, recalled, pinned=pinned
+    )
     if recalled:
         ralog.log_event(session.slug, "memory_recall", {
             "query": user_input,
@@ -217,7 +221,10 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
     })
 
     recalled = session.memory.recall(prompt, top_k=MEMORY_RECALL_TOP_K)
-    augmented_system = _augment_system_prompt(session.base_system_prompt, recalled)
+    pinned = qs.latest_session_block(session.slug)
+    augmented_system = _augment_system_prompt(
+        session.base_system_prompt, recalled, pinned=pinned
+    )
 
     assistant_text: str | None = None
 
@@ -291,23 +298,33 @@ def _store_turn(session: AgentSession, user_input: str, assistant_text: str | No
 def _augment_system_prompt(
     base: str,
     memories: list[ramem.MemoryEntry],
+    pinned: str | None = None,
 ) -> str:
-    if not memories:
-        return base
-    lines: list[str] = []
-    for m in memories:
-        date = m.timestamp[:10] if m.timestamp else "earlier"
-        speaker = "you" if m.role == "assistant" else "the human"
-        lines.append(f"- [{date} · {speaker}] {m.content}")
-    block = "\n".join(lines)
-    return (
-        f"{base}\n\n"
-        f"---\n\n"
-        f"What you remember from past sessions, most relevant to this moment "
-        f"(not necessarily recent):\n\n{block}\n\n"
-        f"Treat these as recollection — context you carry, not a transcript "
-        f"you must respond to. If they don't fit, let them pass."
-    )
+    sections = [base]
+
+    if pinned:
+        sections.append(
+            f"---\n\n{pinned}\n\n"
+            f"This is carried forward as continuity, not something you must "
+            f"respond to."
+        )
+
+    if memories:
+        lines: list[str] = []
+        for m in memories:
+            date = m.timestamp[:10] if m.timestamp else "earlier"
+            speaker = "you" if m.role == "assistant" else "the human"
+            lines.append(f"- [{date} · {speaker}] {m.content}")
+        block = "\n".join(lines)
+        sections.append(
+            f"---\n\n"
+            f"What you remember from past sessions, most relevant to this moment "
+            f"(not necessarily recent):\n\n{block}\n\n"
+            f"Treat these as recollection — context you carry, not a transcript "
+            f"you must respond to. If they don't fit, let them pass."
+        )
+
+    return "\n\n".join(sections)
 
 
 def _execute_tool(session: AgentSession, tc: ToolCall) -> ToolResult:
