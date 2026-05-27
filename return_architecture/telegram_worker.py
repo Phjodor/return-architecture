@@ -13,9 +13,11 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import tomllib
 
 from telegram import BotCommand, Update
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     ApplicationBuilder,
@@ -118,6 +120,25 @@ def run_worker(slug: str) -> None:
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 
+async def _keep_typing(bot, chat_id: int) -> None:
+    """Keep Telegram's "typing…" action alive while the agent composes.
+
+    Telegram clears the indicator after a few seconds, so we re-send it on an
+    interval until the surrounding turn finishes and cancels this task. The
+    indicator is a nicety, never a reason to fail a turn, so send errors are
+    swallowed.
+    """
+    try:
+        while True:
+            try:
+                await bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+            except Exception:
+                pass
+            await asyncio.sleep(4)
+    except asyncio.CancelledError:
+        pass
+
+
 async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     if not update.message or not update.message.text:
         return
@@ -156,6 +177,7 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
                 except ValueError:
                     pass
 
+    typing_task = asyncio.create_task(_keep_typing(context.bot, incoming_chat_id))
     try:
         async with turn_lock:
             reply = await asyncio.to_thread(runtime.turn, session, text)
@@ -163,6 +185,10 @@ async def _on_text(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ralog.log_event(slug, "telegram_turn_error", {"error": repr(e)})
         await update.message.reply_text(f"[error: {e}]")
         return
+    finally:
+        typing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await typing_task
 
     if reply:
         await _send_chunked(update, reply)
@@ -210,6 +236,7 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     })
 
     user_text = caption or "(the human sent an image without a caption)"
+    typing_task = asyncio.create_task(_keep_typing(context.bot, incoming_chat_id))
     try:
         async with turn_lock:
             reply = await asyncio.to_thread(runtime.turn, session, user_text, [image])
@@ -217,6 +244,10 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
         ralog.log_event(slug, "telegram_photo_turn_error", {"error": repr(e)})
         await update.message.reply_text(f"[error: {e}]")
         return
+    finally:
+        typing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await typing_task
 
     if reply:
         await _send_chunked(update, reply)
