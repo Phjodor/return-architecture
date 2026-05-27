@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import json
 import random
+import re
 import tomllib
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -90,6 +91,15 @@ QUESTION_BANK: list[dict[str, str]] = [
 ]
 
 _OPEN_TYPES = ("state", "preference", "relational", "identity")
+
+# The user message numbers the questions ("1. ...", "2. ..."); the model is
+# asked to copy the question text exactly and often copies the number too.
+# Strip a leading "N." / "N)" / "N -" prefix so tool calls match the bank.
+_NUM_PREFIX_RE = re.compile(r"^\s*\d+\s*[.)\-:]\s*")
+
+
+def _normalize_question(text: str) -> str:
+    return _NUM_PREFIX_RE.sub("", text or "").strip()
 
 
 # ── Selection ───────────────────────────────────────────────────────────────
@@ -381,21 +391,22 @@ def _record_responses(
     questions: list[dict[str, str]],
     tool_calls: list[dict],
 ) -> tuple[int, int]:
-    by_text = {q["text"]: q for q in questions}
+    by_norm = {_normalize_question(q["text"]): q for q in questions}
     answered = skipped = 0
     seen_questions: set[str] = set()
 
     for tc in tool_calls:
         name = tc.get("name", "")
         inputs = tc.get("input", {}) or {}
-        question = (inputs.get("question") or "").strip()
-        if not question:
+        raw_question = (inputs.get("question") or "").strip()
+        if not raw_question:
             continue
-        qtype = "unknown"
-        matched = by_text.get(question)
-        if matched is not None:
-            qtype = matched["type"]
-        seen_questions.add(question)
+        norm = _normalize_question(raw_question)
+        matched = by_norm.get(norm)
+        # Store the canonical bank text when we recognise the question.
+        question = matched["text"] if matched is not None else norm
+        qtype = matched["type"] if matched is not None else "unknown"
+        seen_questions.add(norm)
 
         if name == "log_answer":
             entry = {
@@ -424,7 +435,7 @@ def _record_responses(
 
     # Any questions the agent didn't address get recorded as implicit skips.
     for q in questions:
-        if q["text"] in seen_questions:
+        if _normalize_question(q["text"]) in seen_questions:
             continue
         entry = {
             "agent":         slug,
@@ -476,7 +487,7 @@ def _compose_human_message(
         q = (inputs.get("question") or "").strip()
         if not q:
             continue
-        action_by_question[q] = {
+        action_by_question[_normalize_question(q)] = {
             "name": tc.get("name", ""),
             "answer": (inputs.get("answer") or "").strip(),
         }
@@ -486,7 +497,7 @@ def _compose_human_message(
         "",
     ]
     for q in questions:
-        action = action_by_question.get(q["text"])
+        action = action_by_question.get(_normalize_question(q["text"]))
         lines.append(f"— {q['text']}")
         if action is None:
             lines.append("  (no response)")
