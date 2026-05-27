@@ -104,6 +104,15 @@ def where():
 @app.command()
 def gui(
     port: int = typer.Option(None, help="Port to run on. Defaults to install config or 8501."),
+    server_address: str = typer.Option(
+        None,
+        "--server-address",
+        help=(
+            "Address to bind the GUI to. Defaults to install config [gui].address, "
+            "else 127.0.0.1. Set e.g. to a Tailscale IP to reach the GUI over your "
+            "tailnet. The GUI has no auth — never bind 0.0.0.0 without a firewall."
+        ),
+    ),
 ):
     """Launch the local Streamlit control panel.
 
@@ -112,28 +121,41 @@ def gui(
     """
     from return_architecture.gui import app as gui_app_module
 
-    if port is None:
+    gui_cfg: dict = {}
+    if port is None or server_address is None:
         try:
             install_cfg = paths.install_config_path()
             if install_cfg.exists():
                 import tomllib
                 with open(install_cfg, "rb") as f:
                     data = tomllib.load(f)
-                port = int((data.get("gui") or {}).get("port", 8501))
-            else:
-                port = 8501
+                gui_cfg = data.get("gui") or {}
         except Exception:
+            gui_cfg = {}
+    if port is None:
+        try:
+            port = int(gui_cfg.get("port", 8501))
+        except (TypeError, ValueError):
             port = 8501
+    if server_address is None:
+        server_address = str(gui_cfg.get("address", "127.0.0.1"))
+    if server_address not in ("127.0.0.1", "localhost"):
+        typer.echo(
+            f"WARNING: GUI binding to {server_address} — the GUI has no auth; "
+            "ensure tailnet/firewall gating.",
+            err=True,
+        )
 
     app_file = Path(gui_app_module.__file__)
-    typer.echo(f"Starting GUI at http://localhost:{port}")
+    _host = "localhost" if server_address in ("127.0.0.1", "localhost") else server_address
+    typer.echo(f"Starting GUI at http://{_host}:{port}")
     typer.echo("Ctrl-C to stop.")
     try:
         subprocess.run(
             [
                 sys.executable, "-m", "streamlit", "run", str(app_file),
                 "--server.port", str(port),
-                "--server.address", "127.0.0.1",
+                "--server.address", server_address,
                 "--browser.gatherUsageStats", "false",
             ],
         )
