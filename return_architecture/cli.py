@@ -15,6 +15,7 @@ from return_architecture import artifact_exchange as ra_artifact
 from return_architecture import daemon as ra_daemon
 from return_architecture import init_agent, items as ra_items, memory as ramem, paths, runtime, scheduling
 from return_architecture import question_sessions as ra_qs
+from return_architecture import reflective_review as ra_reflect
 from return_architecture import service as ra_service
 from return_architecture import summaries as ra_summaries
 from return_architecture import telegram_worker
@@ -334,6 +335,34 @@ def question_pattern_cmd(
     typer.echo(f"Pattern recap over {result.days} days: {result.answered_count} answered, {result.skipped_count} skipped.")
     typer.echo("")
     typer.echo(result.text)
+
+
+@app.command("reflective-review")
+def reflective_review_cmd(
+    slug: str = typer.Argument(..., help="Agent slug."),
+    force: bool = typer.Option(False, "--force", help="Run even if not due (and even if disabled in config)."),
+    no_telegram: bool = typer.Option(False, "--no-telegram", help="Skip Telegram delivery."),
+):
+    """Run a reflective interruption now (one-off / for testing).
+
+    A stateless analyzer on a *different* model reads recent context and
+    writes a two-halves letter (one to the human, one to the agent) plus a
+    short shared summary, stored under <agent>/reflections/ and pinned into
+    the agent's next sessions. Without --force, runs only when due per the
+    [reflective_review] thresholds.
+    """
+    try:
+        result = ra_reflect.run_review(slug, force=force, notify_telegram=not no_telegram)
+    except (FileNotFoundError, ValueError) as e:
+        typer.echo(f"Error: {e}", err=True)
+        raise typer.Exit(1)
+    if not result.ran:
+        typer.echo(f"Did not run: {result.reason}")
+        return
+    typer.echo(f"Reflection written ({result.reason}).")
+    typer.echo(f"Folder: {result.folder}")
+    typer.echo("")
+    typer.echo(result.context_block)
 
 
 @app.command()

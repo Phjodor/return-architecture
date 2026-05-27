@@ -180,6 +180,12 @@ def create_agent(slug: str, *, name: str | None = None,
                 "kind": "question_pattern",
                 "prompt": "(question pattern recap — prompt is unused; observer template lives in the runtime)",
             },
+            "reflective_interruption": {
+                "enabled": False,
+                "cron": "0 6 * * *",
+                "kind": "reflective_interruption",
+                "prompt": "(reflective interruption — prompt is unused; runs only when due per the [reflective_review] thresholds)",
+            },
         },
     })
 

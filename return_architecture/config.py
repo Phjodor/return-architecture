@@ -80,6 +80,19 @@ class ArtifactExchangeSection(BaseModel):
     mediator_max_tokens: int = 600
 
 
+class ReflectiveReviewSection(BaseModel):
+    enabled: bool = False
+    # The analyzer must run on a *different* model than the agent. Defaults to
+    # Anthropic so an OpenAI-backed agent gets genuine separation out of the box.
+    analyzer_provider: Provider = "anthropic"
+    analyzer_model: str = "claude-sonnet-4-6"
+    threshold_days: int = 14
+    threshold_messages: int = 300
+    # Cap on how far back context is gathered, so a long gap can't balloon the prompt.
+    max_lookback_days: int = 45
+    max_tokens: int = 1200
+
+
 class ToolsSection(BaseModel):
     enabled: list[str] = Field(default_factory=lambda: [
         "no_response", "send_to_human_telegram",
@@ -113,6 +126,7 @@ class AgentConfig(BaseModel):
     tools: ToolsSection = Field(default_factory=ToolsSection)
     schedules: dict[str, ScheduleEntry] = Field(default_factory=dict)
     mcp: MCPSection = Field(default_factory=MCPSection)
+    reflective_review: ReflectiveReviewSection = Field(default_factory=ReflectiveReviewSection)
 
 
 # ── Loaders ──────────────────────────────────────────────────────────────────

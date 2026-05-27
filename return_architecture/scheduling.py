@@ -23,6 +23,7 @@ from apscheduler.triggers.cron import CronTrigger
 from return_architecture import config as cfg
 from return_architecture import logging as ralog
 from return_architecture import question_sessions as ra_qs
+from return_architecture import reflective_review as ra_reflect
 from return_architecture import runtime
 from return_architecture import summaries as ra_summaries
 
@@ -117,6 +118,24 @@ class AgentScheduler:
                     f"{pattern_result.skipped_count} skipped in window",
                     flush=True,
                 )
+            return
+
+        if kind == "reflective_interruption":
+            async with self._lock:
+                try:
+                    review = await asyncio.to_thread(
+                        ra_reflect.run_review, self._session.slug
+                    )
+                except Exception as e:
+                    print(f"[scheduler] reflective review '{ping_name}' errored: {e}", flush=True)
+                    ralog.log_event(self._session.slug, "scheduled_ping_error", {
+                        "ping_name": ping_name, "kind": kind, "error": repr(e),
+                    })
+                    return
+            if review.ran:
+                print(f"[scheduler] reflective review '{ping_name}' done: {review.folder}", flush=True)
+            else:
+                print(f"[scheduler] reflective review '{ping_name}' skipped: {review.reason}", flush=True)
             return
 
         final_prompt = prompt

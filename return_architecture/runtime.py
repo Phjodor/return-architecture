@@ -19,6 +19,7 @@ from return_architecture import config as cfg
 from return_architecture import logging as ralog
 from return_architecture import memory as ramem
 from return_architecture import question_sessions as qs
+from return_architecture import reflective_review as rr
 from return_architecture.mcp_client import MCPError, MCPServer
 from return_architecture.providers import ImageContent, Message, Provider, ToolCall
 from return_architecture.providers.anthropic_provider import AnthropicProvider
@@ -138,7 +139,7 @@ def turn(
     })
 
     recalled = session.memory.recall(user_input, top_k=MEMORY_RECALL_TOP_K)
-    pinned = qs.latest_session_block(session.slug)
+    pinned = _pinned_blocks(session.slug)
     augmented_system = _augment_system_prompt(
         session.base_system_prompt, recalled, pinned=pinned
     )
@@ -221,7 +222,7 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
     })
 
     recalled = session.memory.recall(prompt, top_k=MEMORY_RECALL_TOP_K)
-    pinned = qs.latest_session_block(session.slug)
+    pinned = _pinned_blocks(session.slug)
     augmented_system = _augment_system_prompt(
         session.base_system_prompt, recalled, pinned=pinned
     )
@@ -293,6 +294,17 @@ def _store_turn(session: AgentSession, user_input: str, assistant_text: str | No
     session.memory.remember(user_input, role="user", session_id=session.session_id)
     if assistant_text:
         session.memory.remember(assistant_text, role="assistant", session_id=session.session_id)
+
+
+def _pinned_blocks(slug: str) -> str | None:
+    """Continuity blocks pinned into the system prompt: the latest question
+    session and the latest independent reflection, if either exists."""
+    blocks = [
+        qs.latest_session_block(slug),
+        rr.latest_context_block(slug),
+    ]
+    present = [b for b in blocks if b]
+    return "\n\n".join(present) if present else None
 
 
 def _augment_system_prompt(
