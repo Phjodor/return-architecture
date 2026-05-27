@@ -416,6 +416,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 Environment=RA_INSTALL_ROOT={install_root}
+Environment=PYTHONUNBUFFERED=1
 ExecStart={executable} daemon {slug}
 Restart=on-failure
 RestartSec=60
