@@ -271,6 +271,8 @@ def _build_plist(
     <dict>
         <key>RA_INSTALL_ROOT</key>
         <string>{install_root}</string>
+        <key>PYTHONUNBUFFERED</key>
+        <string>1</string>
     </dict>
     <key>RunAtLoad</key>
     <true/>
