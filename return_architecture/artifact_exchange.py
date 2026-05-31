@@ -318,6 +318,33 @@ def _llm_with_optional_image(
             max_tokens=max_tokens,
         )
         return (resp.choices[0].message.content or "").strip()
+    if provider == "gemini":
+        import base64 as _b64
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        parts: list = []
+        if image_b64:
+            parts.append(types.Part(inline_data=types.Blob(
+                mime_type=image_mime,
+                data=_b64.b64decode(image_b64),
+            )))
+        parts.append(types.Part(text=user_text))
+        resp = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=parts)],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                max_output_tokens=max_tokens,
+            ),
+        )
+        text_parts: list[str] = []
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate and candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                if getattr(part, "text", None):
+                    text_parts.append(part.text)
+        return "".join(text_parts).strip()
     raise ValueError(f"Unsupported provider: {provider}")
 
 
@@ -355,6 +382,8 @@ def _provider_key(provider: str, secrets: cfg.InstallSecrets) -> str:
         key = secrets.providers.anthropic
     elif provider == "openai":
         key = secrets.providers.openai
+    elif provider == "gemini":
+        key = secrets.providers.gemini
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     if not key:

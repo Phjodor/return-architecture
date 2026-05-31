@@ -19,6 +19,11 @@ from return_architecture.tools.private_writings import (
     ListPrivateWritingsTool,
     ReadPrivateWritingTool,
 )
+from return_architecture.tools.schedule_self import (
+    ScheduleSelfTool,
+    ListMySchedulesTool,
+    CancelMyScheduleTool,
+)
 
 BUILTIN_TOOLS: dict[str, Tool] = {
     "no_response": NoResponseTool(),
@@ -30,6 +35,9 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "write_privately": WritePrivatelyTool(),
     "list_private_writings": ListPrivateWritingsTool(),
     "read_private_writing": ReadPrivateWritingTool(),
+    "schedule_self": ScheduleSelfTool(),
+    "list_my_schedules": ListMySchedulesTool(),
+    "cancel_my_schedule": CancelMyScheduleTool(),
 }
 
 __all__ = ["Tool", "ToolContext", "ToolResult", "BUILTIN_TOOLS"]

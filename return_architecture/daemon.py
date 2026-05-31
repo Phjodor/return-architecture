@@ -22,7 +22,9 @@ def run_daemon(slug: str) -> None:
 
     app = telegram_worker.build_application(slug, session, turn_lock)
     sched = scheduling.AgentScheduler(session, turn_lock)
+    session.scheduler = sched
     handles = sched.register_from_config()
+    self_registered = sched.register_self_schedules()
 
     enabled = [h for h in handles if h.enabled]
     disabled = [h for h in handles if not h.enabled]
@@ -35,6 +37,8 @@ def run_daemon(slug: str) -> None:
         print(f"[daemon] schedules enabled: (none)")
     if disabled:
         print(f"[daemon] schedules defined but disabled: {', '.join(h.name for h in disabled)}")
+    if self_registered:
+        print(f"[daemon] self-schedules registered: {self_registered}")
     print(f"[daemon] Ctrl-C to stop.")
 
     async def _post_init(_app):

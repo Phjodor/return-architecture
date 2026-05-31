@@ -13,9 +13,15 @@ class ToolContext:
 
     Tools should read whatever else they need (secrets, paths) from disk
     based on the slug, rather than receiving more state directly.
+
+    `scheduler` is populated when the session is running under the daemon
+    (so tools like schedule_self can mutate the live job store). It is
+    None for one-shot CLI chat sessions; tools that need it should refuse
+    politely.
     """
     slug: str
     session_id: str
+    scheduler: Any = None
 
 
 @dataclass

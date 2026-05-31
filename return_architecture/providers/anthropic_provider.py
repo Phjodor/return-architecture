@@ -30,6 +30,9 @@ class AnthropicProvider(Provider):
         model: str,
         max_tokens: int,
         temperature: float | None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        thinking_budget: int | None = None,
     ) -> ProviderResponse:
         anthropic_messages = [_to_anthropic_message(m) for m in messages]
         kwargs: dict[str, Any] = {
@@ -41,6 +44,10 @@ class AnthropicProvider(Provider):
         }
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
+        if top_k is not None:
+            kwargs["top_k"] = top_k
         resp = self._client.messages.create(**kwargs)
 
         text_parts: list[str] = []

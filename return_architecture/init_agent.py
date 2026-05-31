@@ -57,6 +57,7 @@ def ensure_install_root() -> Path:
             "providers": {
                 "anthropic": "",
                 "openai": "",
+                "gemini": "",
             },
         }, secret=True)
 

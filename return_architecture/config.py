@@ -42,6 +42,7 @@ class InstallConfig(BaseModel):
 class ProviderSecrets(BaseModel):
     anthropic: str | None = None
     openai: str | None = None
+    gemini: str | None = None
 
 
 class InstallSecrets(BaseModel):
@@ -50,7 +51,7 @@ class InstallSecrets(BaseModel):
 
 # ── Per-agent ───────────────────────────────────────────────────────────────
 
-Provider = Literal["anthropic", "openai"]
+Provider = Literal["anthropic", "openai", "gemini"]
 
 
 class AgentSection(BaseModel):
@@ -65,11 +66,24 @@ class ModelSection(BaseModel):
     # None means "let the provider use its default" — useful for models
     # (e.g. some OpenAI reasoning models) that only accept the default.
     temperature: float | None = None
+    # Sampling knobs. top_p applies to all providers; top_k applies to
+    # anthropic + gemini (openai ignores it).
+    top_p: float | None = None
+    top_k: int | None = None
+    # Gemini-only. 0 disables thinking (2.5 Flash), -1 lets the model
+    # choose dynamically, a positive number is a hard token cap. None
+    # means provider default (dynamic for 2.5 models).
+    thinking_budget: int | None = None
 
 
 class BehaviorSection(BaseModel):
     silence_allowed: bool = True
     max_self_scheduled_jobs_per_day: int = 5
+    # When > 0, each new session is pre-filled with this many of the agent's
+    # most recent memory entries as real chat history. The agent "arrives"
+    # with prior turns already in context, instead of only retrieving them
+    # via semantic recall. 0 = current behavior (empty session).
+    seed_chat_history_from_memory: int = 0
 
 
 class ArtifactExchangeSection(BaseModel):

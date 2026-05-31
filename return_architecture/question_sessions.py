@@ -288,6 +288,8 @@ def _provider_key(provider: str, secrets: cfg.InstallSecrets) -> str:
         key = secrets.providers.anthropic
     elif provider == "openai":
         key = secrets.providers.openai
+    elif provider == "gemini":
+        key = secrets.providers.gemini
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     if not key:
@@ -342,6 +344,41 @@ def _reflect(
             except json.JSONDecodeError:
                 args = {}
             out.append({"name": tc.function.name, "input": args})
+        return out
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        declarations = [
+            types.FunctionDeclaration(
+                name=t["name"],
+                description=t.get("description", ""),
+                parameters=t.get("input_schema"),
+            )
+            for t in _TOOLS_ANTHROPIC
+        ]
+        resp = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_message)])],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                tools=[types.Tool(function_declarations=declarations)],
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode="ANY",
+                        allowed_function_names=[t["name"] for t in _TOOLS_ANTHROPIC],
+                    ),
+                ),
+                max_output_tokens=max(max_tokens, 4096),
+            ),
+        )
+        out: list[dict] = []
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate and candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                fc = getattr(part, "function_call", None)
+                if fc:
+                    out.append({"name": fc.name, "input": dict(fc.args) if fc.args else {}})
         return out
     raise ValueError(f"Unsupported provider: {provider}")
 
@@ -601,6 +638,26 @@ def _observer_text_call(
             ],
         )
         return (resp.choices[0].message.content or "").strip()
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        resp = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_text)])],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                max_output_tokens=max(max_tokens, 2048),
+            ),
+        )
+        text_parts: list[str] = []
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate and candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                is_thought = bool(getattr(part, "thought", False))
+                if getattr(part, "text", None) and not is_thought:
+                    text_parts.append(part.text)
+        return "".join(text_parts).strip()
     raise ValueError(f"Unsupported provider: {provider}")
 
 

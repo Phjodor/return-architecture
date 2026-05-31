@@ -12,7 +12,7 @@ from return_architecture import paths
 from return_architecture.gui import helpers
 
 
-PROVIDERS = ("anthropic", "openai")
+PROVIDERS = ("anthropic", "openai", "gemini")
 
 
 def render() -> None:

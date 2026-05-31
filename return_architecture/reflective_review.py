@@ -235,6 +235,8 @@ def _provider_key(provider: str, secrets: cfg.InstallSecrets) -> str:
         key = secrets.providers.anthropic
     elif provider == "openai":
         key = secrets.providers.openai
+    elif provider == "gemini":
+        key = secrets.providers.gemini
     else:
         raise ValueError(f"Unsupported provider: {provider}")
     if not key:
@@ -285,6 +287,37 @@ def _analyze(
                     return json.loads(tc.function.arguments) if tc.function.arguments else {}
                 except json.JSONDecodeError:
                     return {}
+        return {}
+    if provider == "gemini":
+        from google import genai
+        from google.genai import types
+        client = genai.Client(api_key=api_key)
+        declaration = types.FunctionDeclaration(
+            name=_SUBMIT_TOOL_ANTHROPIC["name"],
+            description=_SUBMIT_TOOL_ANTHROPIC.get("description", ""),
+            parameters=_SUBMIT_TOOL_ANTHROPIC.get("input_schema"),
+        )
+        resp = client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=[types.Part(text=user_message)])],
+            config=types.GenerateContentConfig(
+                system_instruction=system,
+                tools=[types.Tool(function_declarations=[declaration])],
+                tool_config=types.ToolConfig(
+                    function_calling_config=types.FunctionCallingConfig(
+                        mode="ANY",
+                        allowed_function_names=["submit_reflection"],
+                    ),
+                ),
+                max_output_tokens=max(max_tokens, 4096),
+            ),
+        )
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate and candidate.content and candidate.content.parts:
+            for part in candidate.content.parts:
+                fc = getattr(part, "function_call", None)
+                if fc and fc.name == "submit_reflection":
+                    return dict(fc.args) if fc.args else {}
         return {}
     raise ValueError(f"Unsupported provider: {provider}")
 

@@ -23,6 +23,7 @@ from return_architecture import reflective_review as rr
 from return_architecture.mcp_client import MCPError, MCPServer
 from return_architecture.providers import ImageContent, Message, Provider, ToolCall
 from return_architecture.providers.anthropic_provider import AnthropicProvider
+from return_architecture.providers.gemini_provider import GeminiProvider
 from return_architecture.providers.openai_provider import OpenAIProvider
 from return_architecture.tools import BUILTIN_TOOLS, Tool
 from return_architecture.tools.base import ToolContext, ToolResult
@@ -44,6 +45,11 @@ class AgentSession:
     memory: ramem.MemoryStore
     messages: list[Message]
     mcp_servers: dict[str, MCPServer] = field(default_factory=dict)
+    # Populated by the daemon when running under a service so the
+    # schedule_self tool can mutate the live scheduler. Left None when the
+    # session is built for a one-shot CLI chat — schedule tools refuse
+    # politely in that case.
+    scheduler: Any = None
 
     def tool_schemas(self) -> list[dict[str, Any]]:
         return [t.schema() for t in self.tools.values()]
@@ -74,6 +80,10 @@ def build_session(slug: str) -> AgentSession:
             continue
         tools[name] = tool
 
+    seeded_messages = _seed_messages_from_memory(
+        memory, agent_cfg.behavior.seed_chat_history_from_memory
+    )
+
     return AgentSession(
         slug=slug,
         session_id=ramem.new_session_id(),
@@ -82,9 +92,31 @@ def build_session(slug: str) -> AgentSession:
         provider=provider,
         tools=tools,
         memory=memory,
-        messages=[],
+        messages=seeded_messages,
         mcp_servers=mcp_servers,
     )
+
+
+def _seed_messages_from_memory(
+    memory: ramem.MemoryStore, n: int
+) -> list[Message]:
+    """Load the N most recent memory entries as chat history, oldest first.
+
+    Lets an agent "arrive" with prior turns already in context, rather than
+    relying solely on semantic recall. Used when behavior.seed_chat_history_from_memory
+    is > 0. Filters to user/assistant turns; ignores anything else.
+    """
+    if n <= 0:
+        return []
+    entries = memory.recent(limit=n)
+    # memory.recent returns newest first; reverse for chronological order.
+    entries = list(reversed(entries))
+    seeded: list[Message] = []
+    for e in entries:
+        if e.role not in ("user", "assistant"):
+            continue
+        seeded.append(Message(role=e.role, content=e.content))
+    return seeded
 
 
 def _start_mcp_servers(
@@ -163,6 +195,9 @@ def turn(
             model=session.config.model.name,
             max_tokens=session.config.model.max_tokens,
             temperature=session.config.model.temperature,
+            top_p=session.config.model.top_p,
+            top_k=session.config.model.top_k,
+            thinking_budget=session.config.model.thinking_budget,
         )
 
         session.messages.append(Message(
@@ -214,7 +249,13 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
     out via send_to_human_telegram. The return value is the final text the
     agent produced; the caller typically just logs it.
     """
-    framed = f"[scheduled ping: {ping_name}]\n\n{prompt}"
+    framed = (
+        f"[scheduled ping: {ping_name}]\n\n{prompt}\n\n"
+        f"(Nothing is auto-delivered during a scheduled ping. If you want "
+        f"the human to receive a message, call send_to_human_telegram. "
+        f"Writing reply text alone will only be logged. You may also "
+        f"choose silence, or use any other tool.)"
+    )
     session.messages.append(Message(role="user", content=framed))
     ralog.log_event(session.slug, "scheduled_ping", {
         "ping_name": ping_name,
@@ -237,6 +278,9 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
             model=session.config.model.name,
             max_tokens=session.config.model.max_tokens,
             temperature=session.config.model.temperature,
+            top_p=session.config.model.top_p,
+            top_k=session.config.model.top_k,
+            thinking_budget=session.config.model.thinking_budget,
         )
 
         session.messages.append(Message(
@@ -343,7 +387,11 @@ def _execute_tool(session: AgentSession, tc: ToolCall) -> ToolResult:
     tool = session.tools.get(tc.name)
     if tool is None:
         return ToolResult(content=f"Error: unknown tool '{tc.name}'")
-    ctx = ToolContext(slug=session.slug, session_id=session.session_id)
+    ctx = ToolContext(
+        slug=session.slug,
+        session_id=session.session_id,
+        scheduler=session.scheduler,
+    )
     return tool.execute(tc.arguments, ctx)
 
 
@@ -358,6 +406,11 @@ def _build_provider(name: str, secrets: cfg.InstallSecrets) -> Provider:
         if not key:
             raise ValueError("OpenAI API key missing from install secrets.toml")
         return OpenAIProvider(api_key=key)
+    if name == "gemini":
+        key = secrets.providers.gemini
+        if not key:
+            raise ValueError("Gemini API key missing from install secrets.toml")
+        return GeminiProvider(api_key=key)
     raise ValueError(f"Unsupported provider: {name}")
 
 

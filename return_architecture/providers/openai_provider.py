@@ -30,6 +30,9 @@ class OpenAIProvider(Provider):
         model: str,
         max_tokens: int,
         temperature: float | None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        thinking_budget: int | None = None,
     ) -> ProviderResponse:
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for m in messages:
@@ -44,6 +47,8 @@ class OpenAIProvider(Provider):
         }
         if temperature is not None:
             kwargs["temperature"] = temperature
+        if top_p is not None:
+            kwargs["top_p"] = top_p
         resp = self._client.chat.completions.create(**kwargs)
 
         choice = resp.choices[0]

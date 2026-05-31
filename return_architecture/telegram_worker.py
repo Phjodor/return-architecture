@@ -69,7 +69,18 @@ def build_application(
             f"Run `return-architecture telegram-discover {slug}` first."
         )
 
-    app: Application = ApplicationBuilder().token(token).build()
+    # Bump from python-telegram-bot's 5s defaults so multi-MB photo
+    # downloads from Telegram's CDN have room to complete.
+    app: Application = (
+        ApplicationBuilder()
+        .token(token)
+        .read_timeout(60)
+        .connect_timeout(30)
+        .write_timeout(60)
+        .pool_timeout(10)
+        .get_updates_read_timeout(60)
+        .build()
+    )
     app.bot_data["session"] = session
     app.bot_data["slug"] = slug
     app.bot_data["expected_chat_id"] = expected_chat_id

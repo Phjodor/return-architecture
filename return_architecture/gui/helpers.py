@@ -54,12 +54,12 @@ def write_install_config(data: dict[str, Any]) -> None:
 def load_install_secrets_raw() -> dict[str, Any]:
     path = paths.install_secrets_path()
     if not path.exists():
-        return {"providers": {"anthropic": "", "openai": ""}}
+        return {"providers": {"anthropic": "", "openai": "", "gemini": ""}}
     try:
         with open(path, "rb") as f:
             return tomllib.load(f)
     except (OSError, tomllib.TOMLDecodeError):
-        return {"providers": {"anthropic": "", "openai": ""}}
+        return {"providers": {"anthropic": "", "openai": "", "gemini": ""}}
 
 
 def write_install_secrets(data: dict[str, Any]) -> None:

@@ -73,6 +73,7 @@ def _any_key_set(secrets: dict) -> bool:
     return (
         helpers.provider_key_set(secrets, "anthropic")
         or helpers.provider_key_set(secrets, "openai")
+        or helpers.provider_key_set(secrets, "gemini")
     )
 
 
@@ -95,7 +96,7 @@ This is a one-time setup. About 5 minutes. You can change anything later.
 
 What you'll do in the next steps:
 
-1. **Paste an API key** for Anthropic or OpenAI (or both)
+1. **Paste an API key** for Anthropic, OpenAI, or Gemini (any one is enough)
 2. **Name your agent** and pick a model
 3. **Review the agent's system prompt** — its identity in text form
 4. **Set up Telegram** so you can message the agent (optional)
@@ -122,6 +123,7 @@ def _step_api_keys() -> None:
     secrets = helpers.load_install_secrets_raw()
     anthropic_set = helpers.provider_key_set(secrets, "anthropic")
     openai_set = helpers.provider_key_set(secrets, "openai")
+    gemini_set = helpers.provider_key_set(secrets, "gemini")
 
     st.markdown(f"**Anthropic**: {'✓ set' if anthropic_set else '✗ not set'}")
     new_anth = st.text_input(
@@ -139,6 +141,14 @@ def _step_api_keys() -> None:
         placeholder="sk-...",
     )
 
+    st.markdown(f"**Gemini**: {'✓ set' if gemini_set else '✗ not set'}")
+    new_gem = st.text_input(
+        "Gemini key (paste, or leave empty) — get one at https://aistudio.google.com/apikey",
+        type="password",
+        key="_w_gem_key",
+        placeholder="AIza...",
+    )
+
     st.divider()
     cols = st.columns([1, 1, 3])
     if cols[0].button("← Back", key="_w_keys_back"):
@@ -148,6 +158,8 @@ def _step_api_keys() -> None:
             helpers.set_provider_key(secrets, "anthropic", new_anth.strip())
         if new_oai.strip():
             helpers.set_provider_key(secrets, "openai", new_oai.strip())
+        if new_gem.strip():
+            helpers.set_provider_key(secrets, "gemini", new_gem.strip())
         helpers.write_install_secrets(secrets)
         secrets = helpers.load_install_secrets_raw()
         if not _any_key_set(secrets):
@@ -186,6 +198,8 @@ def _step_create_agent() -> None:
         providers_available.append("anthropic")
     if helpers.provider_key_set(secrets, "openai"):
         providers_available.append("openai")
+    if helpers.provider_key_set(secrets, "gemini"):
+        providers_available.append("gemini")
 
     if not providers_available:
         st.error("No API keys set — go back to step 1.")
@@ -196,12 +210,17 @@ def _step_create_agent() -> None:
         options=providers_available,
         key="_w_provider",
     )
-    default_model = "claude-opus-4-7" if provider == "anthropic" else "gpt-5"
+    _default_models = {
+        "anthropic": "claude-opus-4-7",
+        "openai":    "gpt-5",
+        "gemini":    "gemini-2.5-pro",
+    }
+    default_model = _default_models.get(provider, "")
     model = st.text_input(
         "Model",
         value=default_model,
         key="_w_model",
-        help="e.g. claude-opus-4-7, claude-sonnet-4-6, gpt-5, gpt-4o",
+        help="e.g. claude-opus-4-7, claude-sonnet-4-6, gpt-5, gpt-4o, gemini-2.5-pro, gemini-2.5-flash",
     )
 
     st.divider()

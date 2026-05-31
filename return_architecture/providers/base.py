@@ -20,6 +20,10 @@ class ToolCall:
     id: str
     name: str
     arguments: dict[str, Any]
+    # Provider-specific opaque blob. Gemini 2.5/3.x returns a thought_signature
+    # on the function_call part during thinking mode, and requires it echoed
+    # back verbatim on the next request. Other providers leave this None.
+    thought_signature: bytes | None = None
 
 
 @dataclass
@@ -65,4 +69,7 @@ class Provider(ABC):
         model: str,
         max_tokens: int,
         temperature: float | None,
+        top_p: float | None = None,
+        top_k: int | None = None,
+        thinking_budget: int | None = None,
     ) -> ProviderResponse: ...
