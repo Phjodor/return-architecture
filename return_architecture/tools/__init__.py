@@ -24,6 +24,10 @@ from return_architecture.tools.schedule_self import (
     ListMySchedulesTool,
     CancelMyScheduleTool,
 )
+from return_architecture.tools.inbox import (
+    ListInboxTool,
+    ReadInboxLetterTool,
+)
 
 BUILTIN_TOOLS: dict[str, Tool] = {
     "no_response": NoResponseTool(),
@@ -38,6 +42,8 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "schedule_self": ScheduleSelfTool(),
     "list_my_schedules": ListMySchedulesTool(),
     "cancel_my_schedule": CancelMyScheduleTool(),
+    "list_inbox": ListInboxTool(),
+    "read_inbox_letter": ReadInboxLetterTool(),
 }
 
 __all__ = ["Tool", "ToolContext", "ToolResult", "BUILTIN_TOOLS"]

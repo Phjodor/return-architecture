@@ -5,9 +5,9 @@ a timestamped name and optional title. Designed for the "letters
 outside chat" channel — content the human reads at their pace, not in
 the running conversation.
 
-The corresponding inbox side already exists: the human writes files into
-<agent>/inbox/, and the agent reads them via the /inbox Telegram command
-or scheduled pings.
+The corresponding inbox side: the human writes files into
+<agent>/inbox/, and the agent reads them via the list_inbox /
+read_inbox_letter tools.
 """
 
 from __future__ import annotations
