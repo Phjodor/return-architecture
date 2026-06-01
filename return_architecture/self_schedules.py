@@ -35,6 +35,11 @@ class SelfScheduleEntry:
     created_at: str  # ISO 8601
     at: str | None = None    # ISO 8601 datetime, when trigger_type == "once"
     cron: str | None = None  # 5-field cron, when trigger_type == "cron"
+    # Category. "self" = deliberate self-set rhythm (counts against the
+    # daily cap). "deferred_response" = a sit_with_this return — a
+    # response held for a chosen future moment, not a new self-imposed
+    # rhythm, so it does not count against the cap.
+    kind: str = "self"
 
 
 @dataclass
@@ -85,11 +90,19 @@ def new_id(name: str) -> str:
 
 
 def count_today(data: SelfScheduleFile, now: datetime | None = None) -> int:
-    """How many self-schedules were created in the past 24h."""
+    """How many deliberate self-schedules were created in the past 24h.
+
+    Deferred-response holds (sit_with_this) are excluded — those are
+    responses-in-deferred-form, not new self-imposed rhythms, and counting
+    them would pressure the agent to reply flatly when sitting would be
+    the better choice.
+    """
     now = now or datetime.now(timezone.utc)
     cutoff = now - timedelta(hours=24)
     count = 0
     for e in data.schedules:
+        if getattr(e, "kind", "self") != "self":
+            continue
         try:
             ts = datetime.fromisoformat(e.created_at)
         except (TypeError, ValueError):

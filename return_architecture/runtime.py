@@ -18,6 +18,7 @@ from typing import Any
 from return_architecture import config as cfg
 from return_architecture import logging as ralog
 from return_architecture import memory as ramem
+from return_architecture import paths
 from return_architecture import question_sessions as qs
 from return_architecture import reflective_review as rr
 from return_architecture.mcp_client import MCPError, MCPServer
@@ -172,8 +173,9 @@ def turn(
 
     recalled = session.memory.recall(user_input, top_k=MEMORY_RECALL_TOP_K)
     pinned = _pinned_blocks(session.slug)
+    time_anchor = _build_time_anchor(session.memory)
     augmented_system = _augment_system_prompt(
-        session.base_system_prompt, recalled, pinned=pinned
+        session.base_system_prompt, recalled, pinned=pinned, time_anchor=time_anchor
     )
     if recalled:
         ralog.log_event(session.slug, "memory_recall", {
@@ -264,8 +266,9 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
 
     recalled = session.memory.recall(prompt, top_k=MEMORY_RECALL_TOP_K)
     pinned = _pinned_blocks(session.slug)
+    time_anchor = _build_time_anchor(session.memory)
     augmented_system = _augment_system_prompt(
-        session.base_system_prompt, recalled, pinned=pinned
+        session.base_system_prompt, recalled, pinned=pinned, time_anchor=time_anchor
     )
 
     assistant_text: str | None = None
@@ -342,21 +345,85 @@ def _store_turn(session: AgentSession, user_input: str, assistant_text: str | No
 
 def _pinned_blocks(slug: str) -> str | None:
     """Continuity blocks pinned into the system prompt: the latest question
-    session and the latest independent reflection, if either exists."""
+    session, the latest independent reflection, and the agent's own running
+    'where I am now' file, if any exist."""
     blocks = [
         qs.latest_session_block(slug),
         rr.latest_context_block(slug),
+        _load_now_block(slug),
     ]
     present = [b for b in blocks if b]
     return "\n\n".join(present) if present else None
+
+
+def _load_now_block(slug: str) -> str | None:
+    """Read <agent>/now.md if it exists. Re-read fresh on every turn so
+    updates via update_now take effect immediately."""
+    path = paths.agent_dir(slug) / "now.md"
+    if not path.exists():
+        return None
+    try:
+        text = path.read_text(encoding="utf-8").strip()
+    except OSError:
+        return None
+    if not text:
+        return None
+    return f"── Where I am now ──\n{text}"
+
+
+def _last_human_message_time(memory_store: ramem.MemoryStore):
+    """Return the timestamp (as a datetime) of the most recent user-role
+    memory entry, or None if there isn't one."""
+    from datetime import datetime
+    try:
+        entries = memory_store.recent(limit=50)
+    except Exception:
+        return None
+    for e in entries:  # already sorted newest first
+        if e.role == "user" and e.timestamp:
+            try:
+                return datetime.fromisoformat(e.timestamp)
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _build_time_anchor(memory_store: ramem.MemoryStore) -> str:
+    """One-line temporal context — current local time + how long since the
+    human last said something. Injected into the system prompt on every
+    turn and ping so the agent has kairotic awareness."""
+    from datetime import datetime
+    now = datetime.now().astimezone()
+    parts = [f"Now: {now.strftime('%Y-%m-%d %H:%M %A')}"]
+    last = _last_human_message_time(memory_store)
+    if last is not None:
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=now.tzinfo)
+        delta = now - last
+        total_seconds = delta.total_seconds()
+        if total_seconds < 0:
+            human_str = "just now"
+        elif total_seconds < 60:
+            human_str = f"{int(total_seconds)} seconds ago"
+        elif total_seconds < 3600:
+            human_str = f"{int(total_seconds // 60)} minutes ago"
+        elif total_seconds < 86400:
+            human_str = f"{total_seconds / 3600:.1f} hours ago"
+        else:
+            human_str = f"{total_seconds / 86400:.1f} days ago"
+        parts.append(f"Last from the human: {human_str}")
+    return ". ".join(parts) + "."
 
 
 def _augment_system_prompt(
     base: str,
     memories: list[ramem.MemoryEntry],
     pinned: str | None = None,
+    time_anchor: str | None = None,
 ) -> str:
     sections = [base]
+    if time_anchor:
+        sections.append(f"---\n\n{time_anchor}")
 
     if pinned:
         sections.append(
@@ -387,10 +454,19 @@ def _execute_tool(session: AgentSession, tc: ToolCall) -> ToolResult:
     tool = session.tools.get(tc.name)
     if tool is None:
         return ToolResult(content=f"Error: unknown tool '{tc.name}'")
+    # Find the most recent user-role message so tools like sit_with_this
+    # can reach back to "what she just said" without the agent having to
+    # quote it as a tool argument.
+    latest_user_message: str | None = None
+    for msg in reversed(session.messages):
+        if msg.role == "user" and msg.content:
+            latest_user_message = msg.content
+            break
     ctx = ToolContext(
         slug=session.slug,
         session_id=session.session_id,
         scheduler=session.scheduler,
+        latest_user_message=latest_user_message,
     )
     return tool.execute(tc.arguments, ctx)
 

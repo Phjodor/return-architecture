@@ -22,6 +22,10 @@ class ToolContext:
     slug: str
     session_id: str
     scheduler: Any = None
+    # The text of the most recent user-role message in the live session,
+    # if any. Populated by the runtime so tools that respond to "what she
+    # just said" (e.g., sit_with_this) can recover it implicitly.
+    latest_user_message: str | None = None
 
 
 @dataclass

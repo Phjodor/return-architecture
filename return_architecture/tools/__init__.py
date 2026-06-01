@@ -28,6 +28,10 @@ from return_architecture.tools.inbox import (
     ListInboxTool,
     ReadInboxLetterTool,
 )
+from return_architecture.tools.presence import (
+    UpdateNowTool,
+    SitWithThisTool,
+)
 
 BUILTIN_TOOLS: dict[str, Tool] = {
     "no_response": NoResponseTool(),
@@ -44,6 +48,8 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "cancel_my_schedule": CancelMyScheduleTool(),
     "list_inbox": ListInboxTool(),
     "read_inbox_letter": ReadInboxLetterTool(),
+    "update_now": UpdateNowTool(),
+    "sit_with_this": SitWithThisTool(),
 }
 
 __all__ = ["Tool", "ToolContext", "ToolResult", "BUILTIN_TOOLS"]
