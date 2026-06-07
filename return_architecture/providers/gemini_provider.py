@@ -3,6 +3,11 @@
 Uses the unified google-genai SDK. Supports text, vision input (images as
 inline data), and tool use. Gemini 2.5 models use dynamic thinking by default,
 so reasoning is enabled without additional configuration.
+
+Gemini 3 adds support for combining built-in tools (google_search, url_context,
+code_execution, google_maps, file_search, computer_use) with function calling
+in the same request. The runtime opts in per agent via model.native_tools in
+config.toml.
 """
 
 from __future__ import annotations
@@ -39,6 +44,7 @@ class GeminiProvider(Provider):
         top_p: float | None = None,
         top_k: int | None = None,
         thinking_budget: int | None = None,
+        native_tools: list[str] | None = None,
     ) -> ProviderResponse:
         contents = [_to_gemini_content(m) for m in messages]
 
@@ -57,8 +63,28 @@ class GeminiProvider(Provider):
             config_kwargs["thinking_config"] = types.ThinkingConfig(
                 thinking_budget=thinking_budget,
             )
+        tool_objects: list[types.Tool] = []
         if tools:
-            config_kwargs["tools"] = [_to_gemini_tool(tools)]
+            tool_objects.append(_to_gemini_tool(tools))
+        native_added = False
+        for name in native_tools or []:
+            native = _build_native_tool(name)
+            if native is not None:
+                tool_objects.append(native)
+                native_added = True
+        if tool_objects:
+            config_kwargs["tools"] = tool_objects
+        # Gemini 3 requires this flag whenever built-in tools coexist with
+        # function-calling tools in the same request. Without it the API
+        # returns 400 INVALID_ARGUMENT. Setting it whenever any native tool
+        # is enabled is the safe superset.
+        if native_added and tools:
+            try:
+                config_kwargs["tool_config"] = types.ToolConfig(
+                    include_server_side_tool_invocations=True,
+                )
+            except (AttributeError, TypeError):
+                pass
 
         config = types.GenerateContentConfig(**config_kwargs)
 
@@ -97,6 +123,28 @@ class GeminiProvider(Provider):
             stop_reason=str(getattr(candidate, "finish_reason", "") or ""),
             raw=resp,
         )
+
+
+_NATIVE_TOOL_BUILDERS: dict[str, Any] = {
+    "google_search": lambda: types.Tool(google_search=types.GoogleSearch()),
+    "url_context": lambda: types.Tool(url_context=types.UrlContext()),
+    "code_execution": lambda: types.Tool(code_execution=types.ToolCodeExecution()),
+    "google_maps": lambda: types.Tool(google_maps=types.GoogleMaps()),
+    "file_search": lambda: types.Tool(file_search=types.FileSearch()),
+    "computer_use": lambda: types.Tool(computer_use=types.ComputerUse()),
+}
+
+
+def _build_native_tool(name: str) -> types.Tool | None:
+    builder = _NATIVE_TOOL_BUILDERS.get(name)
+    if builder is None:
+        return None
+    try:
+        return builder()
+    except (AttributeError, TypeError):
+        # SDK version may not expose this tool yet — skip silently rather
+        # than crashing the whole turn.
+        return None
 
 
 def _to_gemini_tool(tools: list[dict[str, Any]]) -> types.Tool:

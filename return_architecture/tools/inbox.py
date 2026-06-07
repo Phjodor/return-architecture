@@ -106,7 +106,7 @@ class ReadInboxLetterTool(Tool):
             },
             "filename": {
                 "type": "string",
-                "description": "Exact filename, e.g. '2026-05-31-To-Arden.md'.",
+                "description": "Exact filename, e.g. '2026-05-31-To-Aria.md'.",
             },
         },
         "required": [],

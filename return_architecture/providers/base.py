@@ -72,4 +72,5 @@ class Provider(ABC):
         top_p: float | None = None,
         top_k: int | None = None,
         thinking_budget: int | None = None,
+        native_tools: list[str] | None = None,
     ) -> ProviderResponse: ...

@@ -33,6 +33,7 @@ class OpenAIProvider(Provider):
         top_p: float | None = None,
         top_k: int | None = None,
         thinking_budget: int | None = None,
+        native_tools: list[str] | None = None,
     ) -> ProviderResponse:
         oai_messages: list[dict[str, Any]] = [{"role": "system", "content": system}]
         for m in messages:

@@ -64,6 +64,7 @@ AGENT_SUBDIRS = [
     "artifacts/incoming",
     "artifacts/notes",
     "artifacts/shared",
+    "images",
     "sessions",
     "reflections",
     "logs",

@@ -74,6 +74,11 @@ class ModelSection(BaseModel):
     # choose dynamically, a positive number is a hard token cap. None
     # means provider default (dynamic for 2.5 models).
     thinking_budget: int | None = None
+    # Provider-native built-in tools to enable alongside function-call tools.
+    # Gemini 3 names: google_search, url_context, code_execution, google_maps,
+    # file_search, computer_use. Other providers ignore this. Off by default —
+    # each agent opts in per tool.
+    native_tools: list[str] = Field(default_factory=list)
 
 
 class BehaviorSection(BaseModel):

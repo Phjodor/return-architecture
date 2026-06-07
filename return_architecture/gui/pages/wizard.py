@@ -183,13 +183,13 @@ def _step_create_agent() -> None:
         "Display name",
         value="",
         key="_w_agent_name",
-        placeholder="e.g. Silas",
+        placeholder="e.g. Aria",
     )
     slug = st.text_input(
         "Slug — the folder name and CLI argument (lowercase letters, digits, hyphens)",
         value="",
         key="_w_agent_slug",
-        placeholder="e.g. silas",
+        placeholder="e.g. aria",
     )
 
     secrets = helpers.load_install_secrets_raw()

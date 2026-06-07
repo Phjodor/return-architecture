@@ -200,6 +200,7 @@ def turn(
             top_p=session.config.model.top_p,
             top_k=session.config.model.top_k,
             thinking_budget=session.config.model.thinking_budget,
+            native_tools=session.config.model.native_tools,
         )
 
         session.messages.append(Message(
@@ -284,6 +285,7 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
             top_p=session.config.model.top_p,
             top_k=session.config.model.top_k,
             thinking_budget=session.config.model.thinking_budget,
+            native_tools=session.config.model.native_tools,
         )
 
         session.messages.append(Message(

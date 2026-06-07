@@ -299,10 +299,33 @@ def _linux_unit_path(slug: str) -> Path:
     return Path.home() / ".config" / "systemd" / "user" / _linux_unit_name(slug)
 
 
+def _user_bus_env() -> dict:
+    """Environment for `systemctl --user`.
+
+    Ensures the user session bus is reachable even when the calling process
+    (e.g. the GUI launched outside a login session) inherited an environment
+    without XDG_RUNTIME_DIR / DBUS_SESSION_BUS_ADDRESS. Without these,
+    `systemctl --user` fails with "Failed to connect to user scope bus".
+    """
+    env = dict(os.environ)
+    runtime_dir = env.get("XDG_RUNTIME_DIR")
+    if not runtime_dir:
+        candidate = f"/run/user/{os.getuid()}"
+        if Path(candidate).is_dir():
+            runtime_dir = candidate
+            env["XDG_RUNTIME_DIR"] = runtime_dir
+    if runtime_dir and not env.get("DBUS_SESSION_BUS_ADDRESS"):
+        bus = Path(runtime_dir) / "bus"
+        if bus.exists():
+            env["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={bus}"
+    return env
+
+
 def _systemctl(*args: str, check: bool = True) -> subprocess.CompletedProcess:
     result = subprocess.run(
         ["systemctl", "--user", *args],
         capture_output=True, text=True,
+        env=_user_bus_env(),
     )
     if check and result.returncode != 0:
         msg = (result.stderr or result.stdout or "").strip()
