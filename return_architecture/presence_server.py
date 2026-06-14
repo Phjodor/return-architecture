@@ -136,6 +136,44 @@ async def _handle_chat(request: web.Request) -> web.StreamResponse:
     return resp
 
 
+async def _handle_third_thing(request: web.Request) -> web.Response:
+    """Surface one real, random memory from the agent's database.
+
+    The "quiet memory" button. Unlike the dev shim (which synthesized a memory
+    from the chat history), this pulls an actual past turn from the agent's
+    ChromaDB store and frames it lightly. Returns plain JSON {"memory": str}.
+    """
+    slug = request.app["slug"]
+    session = request.app["session"]
+    turn_lock: asyncio.Lock = request.app["turn_lock"]
+
+    try:
+        # Share the lock with turns so the Chroma collection isn't read and
+        # written from two threads at once. The read itself is quick.
+        async with turn_lock:
+            entry = await asyncio.to_thread(session.memory.random_entry)
+    except Exception as e:  # noqa: BLE001
+        ralog.log_event(slug, "presence_third_thing_error", {"error": repr(e)})
+        return web.json_response({"error": str(e)}, status=500)
+
+    if entry is None:
+        return web.json_response(
+            {"memory": "A quiet memory surfaces — but the well is still empty. "
+                       "We haven't made enough here yet."}
+        )
+
+    speaker = "Arden" if entry.role == "assistant" else "you"
+    when = entry.timestamp[:10] if entry.timestamp else "some time ago"
+    text = entry.content.strip()
+    if len(text) > 320:
+        text = text[:320].rstrip() + "…"
+    memory = f"A quiet memory surfaces — {speaker}, {when}:\n\n“{text}”"
+    ralog.log_event(slug, "presence_third_thing", {
+        "role": entry.role, "timestamp": entry.timestamp,
+    })
+    return web.json_response({"memory": memory})
+
+
 def build_app(
     slug: str,
     session: Any,
@@ -154,6 +192,7 @@ def build_app(
 
     # Explicit routes win over the static catch-all (registered last).
     app.router.add_post("/api/chat", _handle_chat)
+    app.router.add_post("/api/third-thing", _handle_third_thing)
     app.router.add_get("/", _index)
     app.router.add_static("/", path=str(static_dir), show_index=False)
     return app
