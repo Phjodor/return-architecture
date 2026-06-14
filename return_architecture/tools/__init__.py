@@ -33,6 +33,7 @@ from return_architecture.tools.presence import (
     SitWithThisTool,
 )
 from return_architecture.tools.generate_image import GenerateImageTool
+from return_architecture.tools.set_temperature import SetTemperatureTool
 
 BUILTIN_TOOLS: dict[str, Tool] = {
     "no_response": NoResponseTool(),
@@ -52,6 +53,7 @@ BUILTIN_TOOLS: dict[str, Tool] = {
     "update_now": UpdateNowTool(),
     "sit_with_this": SitWithThisTool(),
     "generate_image": GenerateImageTool(),
+    "set_temperature": SetTemperatureTool(),
 }
 
 __all__ = ["Tool", "ToolContext", "ToolResult", "BUILTIN_TOOLS"]

@@ -26,6 +26,10 @@ class ToolContext:
     # if any. Populated by the runtime so tools that respond to "what she
     # just said" (e.g., sit_with_this) can recover it implicitly.
     latest_user_message: str | None = None
+    # The live AgentSession. Populated by the runtime so tools that mutate
+    # running state (e.g., set_temperature changing the in-memory model
+    # config) can take effect on the next call without a restart.
+    session: Any = None
 
 
 @dataclass

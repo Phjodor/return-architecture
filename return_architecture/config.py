@@ -169,6 +169,23 @@ def load_agent_config(slug: str) -> AgentConfig:
     return AgentConfig.model_validate(_read_toml(paths.agent_config_path(slug)))
 
 
+def update_agent_config_value(slug: str, section: str, key: str, value) -> None:
+    """Persist a single key in one section of an agent's config TOML.
+
+    Reads the raw file, sets [section].key = value, writes it back —
+    leaving every other field untouched. Used by tools that let an agent
+    adjust its own settings (e.g. set_temperature) so the change survives
+    a service restart.
+    """
+    import tomli_w
+
+    path = paths.agent_config_path(slug)
+    data = _read_toml(path)
+    data.setdefault(section, {})[key] = value
+    with open(path, "wb") as f:
+        tomli_w.dump(data, f)
+
+
 def load_system_prompt(slug: str) -> str:
     path = paths.agent_system_prompt_path(slug)
     return path.read_text(encoding="utf-8").strip()
