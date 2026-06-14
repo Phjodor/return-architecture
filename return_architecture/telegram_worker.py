@@ -31,7 +31,7 @@ from return_architecture import artifact_exchange as ra_artifact
 from return_architecture import items as ra_items
 from return_architecture import logging as ralog
 from return_architecture import paths, runtime
-from return_architecture.providers import ImageContent
+from return_architecture.providers import AudioContent, ImageContent
 
 
 def _read_agent_secrets(slug: str) -> dict:
@@ -94,6 +94,7 @@ def build_application(
     app.add_handler(CommandHandler("important", _on_items_command("important")))
     app.add_handler(CommandHandler("commitments", _on_items_command("commitment")))
     app.add_handler(MessageHandler(filters.PHOTO, _on_photo))
+    app.add_handler(MessageHandler(filters.VOICE | filters.AUDIO, _on_voice))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, _on_text))
 
     # Register commands with Telegram so they show in the chat's command menu.
@@ -253,6 +254,96 @@ async def _on_photo(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
             reply = await asyncio.to_thread(runtime.turn, session, user_text, [image])
     except Exception as e:
         ralog.log_event(slug, "telegram_photo_turn_error", {"error": repr(e)})
+        await update.message.reply_text(f"[error: {e}]")
+        return
+    finally:
+        typing_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await typing_task
+
+    if reply:
+        await _send_chunked(update, reply)
+        ralog.log_event(slug, "telegram_message_out", {"text": reply})
+    else:
+        ralog.log_event(slug, "telegram_silence", {})
+
+
+async def _on_voice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    if not update.message:
+        return
+    # Telegram-recorded voice notes arrive as .voice; uploaded sound files as
+    # .audio. Both are handled the same way. (Audio sent as a Document is not
+    # covered here, mirroring the photo handler's JPEG-only scope.)
+    clip = update.message.voice or update.message.audio
+    if clip is None:
+        return
+    incoming_chat_id = update.message.chat_id
+    expected = context.bot_data.get("expected_chat_id")
+    if expected is not None and incoming_chat_id != expected:
+        ralog.log_event(context.bot_data["slug"], "telegram_voice_rejected", {
+            "from_chat_id": incoming_chat_id,
+        })
+        return
+
+    slug = context.bot_data["slug"]
+    session = context.bot_data["session"]
+    turn_lock: asyncio.Lock = context.bot_data["turn_lock"]
+    caption = (update.message.caption or "").strip()
+
+    # Only audio-capable providers expose transcribe(). For others (Anthropic),
+    # there's nothing meaningful to do with a voice clip, so say so plainly.
+    transcribe = getattr(session.provider, "transcribe", None)
+    if transcribe is None:
+        await update.message.reply_text(
+            "[this agent's model can't hear audio — send text instead]"
+        )
+        return
+
+    # Telegram voice notes are OGG/Opus; uploaded files carry their own mime.
+    mime_type = getattr(clip, "mime_type", None) or "audio/ogg"
+    try:
+        file = await context.bot.get_file(clip.file_id)
+        raw = await file.download_as_bytearray()
+    except Exception as e:
+        ralog.log_event(slug, "telegram_voice_download_failed", {"error": repr(e)})
+        await update.message.reply_text(f"[couldn't download the audio: {e}]")
+        return
+
+    b64 = base64.b64encode(bytes(raw)).decode()
+
+    # Transcribe first so the spoken words land in memory/recall; the raw audio
+    # still goes to the turn so the model hears how it was said.
+    try:
+        transcript = await asyncio.to_thread(
+            transcribe,
+            audio_base64=b64,
+            mime_type=mime_type,
+            model=session.config.model.name,
+        )
+    except Exception as e:
+        ralog.log_event(slug, "telegram_voice_transcribe_failed", {"error": repr(e)})
+        transcript = ""
+
+    text_parts = [p for p in (caption, transcript) if p]
+    user_text = "\n\n".join(text_parts) or "(a voice message with no intelligible speech)"
+    clip_audio = AudioContent(base64_data=b64, mime_type=mime_type)
+
+    ralog.log_event(slug, "telegram_voice_in", {
+        "from_chat_id": incoming_chat_id,
+        "bytes": len(raw),
+        "mime_type": mime_type,
+        "transcript_chars": len(transcript),
+        "had_caption": bool(caption),
+    })
+
+    typing_task = asyncio.create_task(_keep_typing(context.bot, incoming_chat_id))
+    try:
+        async with turn_lock:
+            reply = await asyncio.to_thread(
+                runtime.turn, session, user_text, None, [clip_audio]
+            )
+    except Exception as e:
+        ralog.log_event(slug, "telegram_voice_turn_error", {"error": repr(e)})
         await update.message.reply_text(f"[error: {e}]")
         return
     finally:

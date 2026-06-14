@@ -66,8 +66,18 @@ class GeminiProvider(Provider):
         tool_objects: list[types.Tool] = []
         if tools:
             tool_objects.append(_to_gemini_tool(tools))
+        # Gemini rejects a request that combines audio input with the
+        # code_execution built-in tool ("mime type ... not supported for code
+        # execution", 400). When the turn carries audio (a voice message), drop
+        # code_execution for that request only — it's restored automatically on
+        # text-only turns.
+        effective_native_tools = list(native_tools or [])
+        if any(m.audio for m in messages):
+            effective_native_tools = [
+                n for n in effective_native_tools if n != "code_execution"
+            ]
         native_added = False
-        for name in native_tools or []:
+        for name in effective_native_tools:
             native = _build_native_tool(name)
             if native is not None:
                 tool_objects.append(native)
@@ -124,6 +134,39 @@ class GeminiProvider(Provider):
             raw=resp,
         )
 
+    def transcribe(self, *, audio_base64: str, mime_type: str, model: str) -> str:
+        """Transcribe an audio clip to plain text.
+
+        Used so that voice messages are *remembered* as words, not just heard
+        in the moment. The conversational turn still receives the raw audio
+        (so the model hears tone); this is a separate, deterministic call whose
+        only job is to recover the spoken words for memory and recall.
+        """
+        resp = self._client.models.generate_content(
+            model=model,
+            contents=[types.Content(role="user", parts=[
+                types.Part(inline_data=types.Blob(
+                    mime_type=mime_type,
+                    data=base64.b64decode(audio_base64),
+                )),
+                types.Part(text=(
+                    "Transcribe this audio verbatim. Output only the spoken "
+                    "words, with no commentary, speaker labels, timestamps, or "
+                    "formatting. If there is no intelligible speech, output "
+                    "nothing at all."
+                )),
+            ])],
+            config=types.GenerateContentConfig(temperature=0.0),
+        )
+        candidate = resp.candidates[0] if resp.candidates else None
+        if candidate and candidate.content and candidate.content.parts:
+            text = "".join(
+                p.text for p in candidate.content.parts
+                if getattr(p, "text", None) and not getattr(p, "thought", False)
+            )
+            return text.strip()
+        return ""
+
 
 _NATIVE_TOOL_BUILDERS: dict[str, Any] = {
     "google_search": lambda: types.Tool(google_search=types.GoogleSearch()),
@@ -166,6 +209,13 @@ def _to_gemini_content(m: Message) -> types.Content:
                 inline_data=types.Blob(
                     mime_type=img.mime_type,
                     data=base64.b64decode(img.base64_data),
+                )
+            ))
+        for clip in m.audio:
+            parts.append(types.Part(
+                inline_data=types.Blob(
+                    mime_type=clip.mime_type,
+                    data=base64.b64decode(clip.base64_data),
                 )
             ))
         if m.content:

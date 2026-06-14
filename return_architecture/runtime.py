@@ -22,7 +22,13 @@ from return_architecture import paths
 from return_architecture import question_sessions as qs
 from return_architecture import reflective_review as rr
 from return_architecture.mcp_client import MCPError, MCPServer
-from return_architecture.providers import ImageContent, Message, Provider, ToolCall
+from return_architecture.providers import (
+    AudioContent,
+    ImageContent,
+    Message,
+    Provider,
+    ToolCall,
+)
 from return_architecture.providers.anthropic_provider import AnthropicProvider
 from return_architecture.providers.gemini_provider import GeminiProvider
 from return_architecture.providers.openai_provider import OpenAIProvider
@@ -157,18 +163,28 @@ def turn(
     session: AgentSession,
     user_input: str,
     images: list[ImageContent] | None = None,
+    audio: list[AudioContent] | None = None,
 ) -> str:
     """One round-trip: user says something, agent responds (possibly via tools).
 
     Optional inline images are sent with the user message for vision-capable
     models. Images are NOT written to the conversation log or to memory —
     only a marker noting that one was present.
+
+    Optional inline audio is sent so audio-capable models (Gemini) hear the
+    clip natively. Unlike images, audio IS remembered: the caller transcribes
+    the clip first and passes the transcript as user_input, so the spoken
+    words flow into recall and memory through the normal text path.
     """
     images = images or []
-    session.messages.append(Message(role="user", content=user_input, images=images))
+    audio = audio or []
+    session.messages.append(Message(
+        role="user", content=user_input, images=images, audio=audio,
+    ))
     ralog.log_event(session.slug, "user_message", {
         "content": user_input,
         "images": len(images),
+        "audio": len(audio),
     })
 
     recalled = session.memory.recall(user_input, top_k=MEMORY_RECALL_TOP_K)
@@ -469,6 +485,7 @@ def _execute_tool(session: AgentSession, tc: ToolCall) -> ToolResult:
         session_id=session.session_id,
         scheduler=session.scheduler,
         latest_user_message=latest_user_message,
+        session=session,
     )
     return tool.execute(tc.arguments, ctx)
 

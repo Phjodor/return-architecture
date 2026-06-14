@@ -38,6 +38,19 @@ class ImageContent:
 
 
 @dataclass
+class AudioContent:
+    """An inline audio clip attached to a message.
+
+    base64_data is the raw bytes already base64-encoded as a string.
+    mime_type is e.g. 'audio/ogg', 'audio/mp3', 'audio/wav'. Audio-capable
+    models (Gemini) hear the clip natively — tone, pacing, emphasis — rather
+    than receiving a flattened transcript.
+    """
+    base64_data: str
+    mime_type: str
+
+
+@dataclass
 class Message:
     role: Role
     content: str | None = None
@@ -46,6 +59,8 @@ class Message:
     tool_call_id: str | None = None
     # For role=="user" — inline images delivered alongside the text.
     images: list[ImageContent] = field(default_factory=list)
+    # For role=="user" — inline audio delivered alongside the text.
+    audio: list[AudioContent] = field(default_factory=list)
 
 
 @dataclass
