@@ -164,6 +164,7 @@ def turn(
     user_input: str,
     images: list[ImageContent] | None = None,
     audio: list[AudioContent] | None = None,
+    extra_system: str | None = None,
 ) -> str:
     """One round-trip: user says something, agent responds (possibly via tools).
 
@@ -193,6 +194,11 @@ def turn(
     augmented_system = _augment_system_prompt(
         session.base_system_prompt, recalled, pinned=pinned, time_anchor=time_anchor
     )
+    # A channel-specific instruction appended for this turn only (e.g. the
+    # Presence app's <presence> side-channel). Not persisted to the session or
+    # memory — it shapes the reply, it isn't part of who the agent is.
+    if extra_system:
+        augmented_system = f"{augmented_system}\n\n---\n\n{extra_system}"
     if recalled:
         ralog.log_event(session.slug, "memory_recall", {
             "query": user_input,

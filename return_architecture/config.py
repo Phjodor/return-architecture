@@ -138,6 +138,23 @@ class MCPSection(BaseModel):
     servers: dict[str, MCPServerConfig] = Field(default_factory=dict)
 
 
+class PresenceSection(BaseModel):
+    """The Presence web app: a browser chat with an AI-controlled living visual.
+
+    When enabled, the daemon starts an HTTP server (sharing the agent session
+    and turn lock) that serves the frontend and a POST /api/chat SSE endpoint.
+    The endpoint runs the agent's real turn and peels the <presence> state
+    block out of the reply. Off by default. address defaults to localhost; set
+    it to a tailnet IP (like the GUI) to reach it from a phone without exposing
+    it to the open network — there is no auth.
+    """
+    enabled: bool = False
+    address: str = "127.0.0.1"
+    port: int = 4321
+    # Absolute path to the frontend's static directory (its public/).
+    static_dir: str | None = None
+
+
 class AgentConfig(BaseModel):
     agent: AgentSection
     model: ModelSection
@@ -146,6 +163,7 @@ class AgentConfig(BaseModel):
     schedules: dict[str, ScheduleEntry] = Field(default_factory=dict)
     mcp: MCPSection = Field(default_factory=MCPSection)
     reflective_review: ReflectiveReviewSection = Field(default_factory=ReflectiveReviewSection)
+    presence: PresenceSection = Field(default_factory=PresenceSection)
 
 
 # ── Loaders ──────────────────────────────────────────────────────────────────

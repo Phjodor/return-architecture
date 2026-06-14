@@ -12,13 +12,20 @@ from datetime import datetime
 
 from telegram import Update
 
-from return_architecture import runtime, scheduling, telegram_worker
+from return_architecture import (
+    presence_server,
+    runtime,
+    scheduling,
+    telegram_worker,
+)
 
 
 def run_daemon(slug: str) -> None:
     """Blocking. Runs telegram worker and scheduler together until Ctrl-C."""
     session = runtime.build_session(slug)
     turn_lock = asyncio.Lock()
+    presence_cfg = session.config.presence
+    presence_runner = None
 
     app = telegram_worker.build_application(slug, session, turn_lock)
     sched = scheduling.AgentScheduler(session, turn_lock)
@@ -39,14 +46,32 @@ def run_daemon(slug: str) -> None:
         print(f"[daemon] schedules defined but disabled: {', '.join(h.name for h in disabled)}")
     if self_registered:
         print(f"[daemon] self-schedules registered: {self_registered}")
+    if presence_cfg.enabled:
+        print(f"[daemon] presence app: http://{presence_cfg.address}:{presence_cfg.port}")
     print(f"[daemon] Ctrl-C to stop.")
 
     async def _post_init(_app):
+        nonlocal presence_runner
         await telegram_worker.set_bot_commands(_app)
         sched.start()
+        if presence_cfg.enabled:
+            if not presence_cfg.static_dir:
+                print("[daemon] presence: enabled but static_dir is unset — skipping.")
+            else:
+                try:
+                    presence_runner = await presence_server.start(
+                        slug, session, turn_lock,
+                        presence_cfg.address, presence_cfg.port,
+                        presence_cfg.static_dir,
+                    )
+                except Exception as e:
+                    # A broken presence config must not take down Telegram.
+                    print(f"[daemon] presence: failed to start ({e}).")
 
     async def _post_shutdown(_app):
         sched.shutdown()
+        if presence_runner is not None:
+            await presence_runner.cleanup()
         session.close()
 
     app.post_init = _post_init
