@@ -8,8 +8,14 @@ the configured folder.
 Run as:
     python -m return_architecture.mcp_servers.filesystem /path/to/folder
     python -m return_architecture.mcp_servers.filesystem /path/to/folder --read-only
+    python -m return_architecture.mcp_servers.filesystem /path/to/folder --prefix code_
 
 The `--read-only` flag disables write_file and append_file.
+
+The `--prefix NAME` option prepends NAME to every tool name (e.g. `code_read_file`).
+Use it when an agent runs more than one filesystem server so their tool names
+don't collide — the runtime keys tools by name, so two unprefixed instances
+would shadow each other.
 """
 
 from __future__ import annotations
@@ -20,17 +26,22 @@ from pathlib import Path
 from mcp.server.fastmcp import FastMCP
 
 
-def _parse_args() -> tuple[Path, bool]:
+def _parse_args() -> tuple[Path, bool, str]:
     args = sys.argv[1:]
-    if not args:
-        sys.stderr.write(
-            "Usage: filesystem.py <root_path> [--read-only]\n"
-        )
-        sys.exit(2)
     read_only = "--read-only" in args
     args = [a for a in args if a != "--read-only"]
+    prefix = ""
+    if "--prefix" in args:
+        i = args.index("--prefix")
+        if i + 1 >= len(args):
+            sys.stderr.write("--prefix requires a value.\n")
+            sys.exit(2)
+        prefix = args[i + 1]
+        del args[i:i + 2]
     if not args:
-        sys.stderr.write("Missing root path.\n")
+        sys.stderr.write(
+            "Usage: filesystem.py <root_path> [--read-only] [--prefix NAME]\n"
+        )
         sys.exit(2)
     root = Path(args[0]).expanduser().resolve()
     if not root.exists():
@@ -39,15 +50,15 @@ def _parse_args() -> tuple[Path, bool]:
     if not root.is_dir():
         sys.stderr.write(f"Root is not a directory: {root}\n")
         sys.exit(2)
-    return root, read_only
+    return root, read_only, prefix
 
 
-ROOT, READ_ONLY = _parse_args()
+ROOT, READ_ONLY, PREFIX = _parse_args()
 MAX_READ_BYTES = 200_000        # ~200KB per read_file
 MAX_SEARCH_HITS = 30
 MAX_SEARCH_LINE = 300
 
-mcp = FastMCP(f"filesystem")
+mcp = FastMCP(f"filesystem-{PREFIX}" if PREFIX else "filesystem")
 
 
 def _safe_path(rel_path: str) -> Path:
@@ -64,7 +75,7 @@ def _safe_path(rel_path: str) -> Path:
     return candidate
 
 
-@mcp.tool()
+@mcp.tool(name=f"{PREFIX}list_directory")
 def list_directory(path: str = ".") -> str:
     """List the contents of a directory inside the root.
 
@@ -92,7 +103,7 @@ def list_directory(path: str = ".") -> str:
     return "\n".join(entries) if entries else "(empty)"
 
 
-@mcp.tool()
+@mcp.tool(name=f"{PREFIX}read_file")
 def read_file(path: str) -> str:
     """Read a file's text content (UTF-8, up to ~200,000 bytes).
 
@@ -121,7 +132,7 @@ def read_file(path: str) -> str:
     return data.decode("utf-8", errors="replace")
 
 
-@mcp.tool()
+@mcp.tool(name=f"{PREFIX}write_file")
 def write_file(path: str, content: str) -> str:
     """Create or overwrite a UTF-8 text file at `path` inside the root."""
     if READ_ONLY:
@@ -138,7 +149,7 @@ def write_file(path: str, content: str) -> str:
     return f"Wrote {len(content)} characters to {path}."
 
 
-@mcp.tool()
+@mcp.tool(name=f"{PREFIX}append_file")
 def append_file(path: str, content: str) -> str:
     """Append text to a file at `path` (creates the file if it does not exist)."""
     if READ_ONLY:
@@ -156,7 +167,7 @@ def append_file(path: str, content: str) -> str:
     return f"Appended {len(content)} characters to {path}."
 
 
-@mcp.tool()
+@mcp.tool(name=f"{PREFIX}search_files")
 def search_files(query: str, max_results: int = MAX_SEARCH_HITS) -> str:
     """Case-insensitive substring search across all files under the root.
 
