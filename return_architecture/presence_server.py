@@ -27,7 +27,29 @@ from aiohttp import web
 
 from return_architecture import logging as ralog
 from return_architecture import runtime
-from return_architecture.providers import Message
+from return_architecture.providers import AudioContent, ImageContent, Message
+
+
+# Cap on a single uploaded drop (image/sound), base64 in a JSON body.
+MAX_DROP_BYTES = 25 * 1024 * 1024
+
+
+# Appended for /api/drawer turns only: the person dropped something wordlessly
+# and wants the agent to react with its visual body, not with prose.
+DRAWER_INSTRUCTION = (
+    "Something has just been placed wordlessly into the drawer of this space — "
+    "an image, a sound, or a few words, offered without explanation and without "
+    "any request. You have a visual body here whose colour, warmth, energy and "
+    "shape the person can see, and you control it by setting parameters. Take in "
+    "what was dropped, and respond with ONLY a presence block and no other text "
+    "whatsoever — no words, no greeting, no explanation. Let your state shift to "
+    "honestly reflect how it lands in you. Output exactly this and nothing "
+    "after it:\n\n"
+    "<presence>{\"valence\": <-1..1>, \"energy\": <0..1>, \"focus\": <0..1>, "
+    "\"note\": \"<one or two words>\"}</presence>\n\n"
+    "valence = heavy/cool (-1) to warm/light (1); energy = still (0) to vivid "
+    "(1); focus = diffuse (0) to gathered (1); note = one or two plain words."
+)
 
 
 # What gets appended to the agent's assembled system prompt for Presence turns
@@ -191,13 +213,70 @@ async def _handle_third_thing(request: web.Request) -> web.Response:
     return web.json_response({"memory": memory})
 
 
+async def _handle_drawer(request: web.Request) -> web.Response:
+    """Ingest a wordless drop (image / sound / text) and return the agent's
+    visual reaction only — no prose.
+
+    The drop is fed into the agent's real context (it can see images and hear
+    audio natively), and the agent replies with just a <presence> block, which
+    we parse and return as {"presence": {...}}. Any prose it emits is discarded
+    so the drawer stays wordless, as intended.
+    """
+    slug = request.app["slug"]
+    session = request.app["session"]
+    turn_lock: asyncio.Lock = request.app["turn_lock"]
+
+    try:
+        body = await request.json()
+    except Exception:
+        return web.json_response({"error": "invalid JSON body"}, status=400)
+    kind = body.get("kind")
+    data = body.get("data")
+    mime = (body.get("mime") or "").strip()
+    filename = (body.get("filename") or "").strip()
+    if kind not in ("text", "image", "audio") or not data:
+        return web.json_response(
+            {"error": "need kind (text|image|audio) and data"}, status=400
+        )
+
+    images: list[ImageContent] = []
+    audio: list[AudioContent] = []
+    label = f" ({filename})" if filename else ""
+    if kind == "text":
+        dropped = str(data).strip()
+        user_input = f"[Thea dropped this into the drawer, wordlessly: “{dropped[:2000]}”]"
+    elif kind == "image":
+        images = [ImageContent(base64_data=data, mime_type=mime or "image/png")]
+        user_input = f"[Thea dropped an image into the drawer, wordlessly{label}.]"
+    else:  # audio
+        audio = [AudioContent(base64_data=data, mime_type=mime or "audio/mpeg")]
+        user_input = f"[Thea dropped a sound into the drawer, wordlessly{label}.]"
+
+    try:
+        async with turn_lock:
+            reply = await asyncio.to_thread(
+                runtime.turn, session, user_input,
+                images or None, audio or None, DRAWER_INSTRUCTION,
+            )
+    except Exception as e:  # noqa: BLE001
+        ralog.log_event(slug, "presence_drawer_error", {"error": repr(e)})
+        return web.json_response({"error": str(e)}, status=500)
+
+    presence, _prose = _split_presence(reply or "")
+    ralog.log_event(slug, "presence_drawer", {
+        "kind": kind, "mime": mime, "had_presence": presence is not None,
+    })
+    return web.json_response({"presence": presence or {}})
+
+
 def build_app(
     slug: str,
     session: Any,
     turn_lock: asyncio.Lock,
     static_dir: Path,
 ) -> web.Application:
-    app = web.Application()
+    # client_max_size lifted so a dropped image/sound (base64 in JSON) fits.
+    app = web.Application(client_max_size=MAX_DROP_BYTES)
     app["slug"] = slug
     app["session"] = session
     app["turn_lock"] = turn_lock
@@ -210,6 +289,7 @@ def build_app(
     # Explicit routes win over the static catch-all (registered last).
     app.router.add_post("/api/chat", _handle_chat)
     app.router.add_post("/api/third-thing", _handle_third_thing)
+    app.router.add_post("/api/drawer", _handle_drawer)
     app.router.add_get("/", _index)
     app.router.add_static("/", path=str(static_dir), show_index=False)
     return app
