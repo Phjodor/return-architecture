@@ -37,6 +37,8 @@ from return_architecture.tools.base import ToolContext, ToolResult
 from return_architecture.tools.mcp_proxy import MCPProxyTool
 
 
+# Default cap on tool-call rounds per turn. Overridable per agent via
+# behavior.max_tool_loops (e.g. higher for agents that edit multiple files).
 MAX_TOOL_LOOPS = 8
 MEMORY_RECALL_TOP_K = 5
 
@@ -211,7 +213,7 @@ def turn(
 
     assistant_text: str | None = None
 
-    for _ in range(MAX_TOOL_LOOPS):
+    for _ in range(session.config.behavior.max_tool_loops):
         resp = session.provider.complete(
             system=augmented_system,
             messages=session.messages,
@@ -296,7 +298,7 @@ def ping(session: AgentSession, ping_name: str, prompt: str) -> str:
 
     assistant_text: str | None = None
 
-    for _ in range(MAX_TOOL_LOOPS):
+    for _ in range(session.config.behavior.max_tool_loops):
         resp = session.provider.complete(
             system=augmented_system,
             messages=session.messages,

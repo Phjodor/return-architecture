@@ -89,6 +89,10 @@ class BehaviorSection(BaseModel):
     # with prior turns already in context, instead of only retrieving them
     # via semantic recall. 0 = current behavior (empty session).
     seed_chat_history_from_memory: int = 0
+    # How many tool-call rounds a single turn may chain before the runtime
+    # stops with "(stopped: tool loop limit reached)". 8 is fine for chat;
+    # raise it for agents that do multi-step work like editing several files.
+    max_tool_loops: int = 8
 
 
 class ArtifactExchangeSection(BaseModel):
