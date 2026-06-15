@@ -27,6 +27,7 @@ from aiohttp import web
 
 from return_architecture import logging as ralog
 from return_architecture import runtime
+from return_architecture.providers import Message
 
 
 # What gets appended to the agent's assembled system prompt for Presence turns
@@ -168,6 +169,22 @@ async def _handle_third_thing(request: web.Request) -> web.Response:
     if len(text) > 320:
         text = text[:320].rstrip() + "…"
     memory = f"A quiet memory surfaces — {speaker}, {when}:\n\n“{text}”"
+
+    # Put the same surfacing into the shared live context so the agent sees it
+    # too — otherwise only the human sees it on screen. Appended as an ambient
+    # user-role event (like a scheduled ping), not re-stored to long-term
+    # memory (it already lives there). The lock guards the shared message list
+    # against a concurrent turn.
+    whose = "something Arden once said" if entry.role == "assistant" else "something Thea once said"
+    event = (
+        "[Ambient event in the Presence space — not typed by either of you. "
+        f"The “quiet memory” button just surfaced this from your shared history "
+        f"({whose}, {when}): “{text}” — Thea can see it on her screen now. "
+        "Let it sit, or respond to it if it moves you.]"
+    )
+    async with turn_lock:
+        session.messages.append(Message(role="user", content=event))
+
     ralog.log_event(slug, "presence_third_thing", {
         "role": entry.role, "timestamp": entry.timestamp,
     })
