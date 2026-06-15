@@ -19,6 +19,7 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+import os
 import re
 from pathlib import Path
 from typing import Any
@@ -26,6 +27,7 @@ from typing import Any
 from aiohttp import web
 
 from return_architecture import logging as ralog
+from return_architecture import paths
 from return_architecture import runtime
 from return_architecture.providers import AudioContent, ImageContent, Message
 
@@ -72,6 +74,81 @@ PRESENCE_INSTRUCTION = (
 )
 
 _PRESENCE_RE = re.compile(r"<presence>\s*(\{.*?\})\s*</presence>", re.DOTALL)
+
+
+# ── Server-side transcript ──────────────────────────────────────────────────
+# A device-independent record of the Presence-app conversation, so the visible
+# history follows the human across devices (phone, laptop). Distinct from
+# ChromaDB memory (semantic recall) and the NDJSON event log (full telemetry);
+# this is just the clean chat transcript for display. Chat turns only — the
+# ephemeral drawer/quiet-memory markers are not recorded.
+
+MAX_TRANSCRIPT = 1000
+
+
+def _transcript_path(slug: str) -> Path:
+    return paths.agent_dir(slug) / "presence_transcript.json"
+
+
+def _backfill_from_logs(slug: str) -> list[dict[str, str]]:
+    """Reconstruct the app transcript from past NDJSON logs, so enabling this
+    feature doesn't appear to wipe an existing conversation. Pairs
+    presence_message_in (human) with presence_message_out (agent) in order."""
+    out: list[dict[str, str]] = []
+    logs_dir = paths.agent_logs_dir(slug)
+    if not logs_dir.exists():
+        return out
+    for f in sorted(logs_dir.glob("conversations-*.ndjson")):
+        try:
+            lines = f.read_text(encoding="utf-8").splitlines()
+        except OSError:
+            continue
+        for line in lines:
+            if not line.strip():
+                continue
+            try:
+                ev = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            t = ev.get("type")
+            if t == "presence_message_in" and ev.get("content"):
+                out.append({"role": "user", "content": ev["content"]})
+            elif t == "presence_message_out" and ev.get("text"):
+                text = ev["text"]
+                if text.strip() == "(stopped: tool loop limit reached)":
+                    continue
+                out.append({"role": "assistant", "content": text})
+    return out[-MAX_TRANSCRIPT:]
+
+
+def _load_transcript(slug: str) -> list[dict[str, str]]:
+    p = _transcript_path(slug)
+    if p.exists():
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            return data if isinstance(data, list) else []
+        except (OSError, json.JSONDecodeError):
+            return []
+    # First run: seed from the logs and persist so it's stable thereafter.
+    seeded = _backfill_from_logs(slug)
+    if seeded:
+        _write_transcript(slug, seeded)
+    return seeded
+
+
+def _write_transcript(slug: str, data: list[dict[str, str]]) -> None:
+    p = _transcript_path(slug)
+    tmp = p.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    os.replace(tmp, p)
+
+
+def _append_transcript(slug: str, role: str, content: str) -> None:
+    if not content:
+        return
+    data = _load_transcript(slug)
+    data.append({"role": role, "content": content})
+    _write_transcript(slug, data[-MAX_TRANSCRIPT:])
 
 
 def _split_presence(text: str) -> tuple[dict[str, Any] | None, str]:
@@ -147,6 +224,12 @@ async def _handle_chat(request: web.Request) -> web.StreamResponse:
         ralog.log_event(slug, "presence_message_out", {
             "text": prose, "had_presence": presence is not None,
         })
+        # Persist the exchange to the device-independent transcript (display
+        # history). Record the human turn always; the agent turn only if it
+        # spoke (silence leaves no bubble, matching the live UI).
+        await asyncio.to_thread(_append_transcript, slug, "user", user_input)
+        if prose:
+            await asyncio.to_thread(_append_transcript, slug, "assistant", prose)
     except Exception as e:  # noqa: BLE001 — surface any failure to the client
         ralog.log_event(slug, "presence_chat_error", {"error": repr(e)})
         try:
@@ -157,6 +240,13 @@ async def _handle_chat(request: web.Request) -> web.StreamResponse:
         with contextlib.suppress(Exception):
             await resp.write_eof()
     return resp
+
+
+async def _handle_history(request: web.Request) -> web.Response:
+    """Return the device-independent app transcript for display on load."""
+    slug = request.app["slug"]
+    messages = await asyncio.to_thread(_load_transcript, slug)
+    return web.json_response({"messages": messages})
 
 
 async def _handle_third_thing(request: web.Request) -> web.Response:
@@ -288,6 +378,7 @@ def build_app(
 
     # Explicit routes win over the static catch-all (registered last).
     app.router.add_post("/api/chat", _handle_chat)
+    app.router.add_get("/api/history", _handle_history)
     app.router.add_post("/api/third-thing", _handle_third_thing)
     app.router.add_post("/api/drawer", _handle_drawer)
     app.router.add_get("/", _index)
