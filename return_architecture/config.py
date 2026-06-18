@@ -155,7 +155,9 @@ class PresenceSection(BaseModel):
     enabled: bool = False
     address: str = "127.0.0.1"
     port: int = 4321
-    # Absolute path to the frontend's static directory (its public/).
+    # Absolute path to the frontend's static directory (its public/). When
+    # unset, the frontend bundled in the package is served — so enabling
+    # presence needs nothing more than `enabled = true`.
     static_dir: str | None = None
 
 

@@ -76,6 +76,13 @@ PRESENCE_INSTRUCTION = (
 _PRESENCE_RE = re.compile(r"<presence>\s*(\{.*?\})\s*</presence>", re.DOTALL)
 
 
+def bundled_static_dir() -> Path:
+    """The frontend that ships inside the package. Used when an agent's
+    ``[presence] static_dir`` is unset, so any agent can enable Presence
+    without keeping its own copy of the frontend."""
+    return Path(__file__).resolve().parent / "presence_static"
+
+
 # ── Server-side transcript ──────────────────────────────────────────────────
 # A device-independent record of the Presence-app conversation, so the visible
 # history follows the human across devices (phone, laptop). Distinct from
@@ -392,11 +399,16 @@ async def start(
     turn_lock: asyncio.Lock,
     address: str,
     port: int,
-    static_dir: str,
+    static_dir: str | None,
 ) -> web.AppRunner:
     """Start the Presence server on the current event loop. Returns the runner
-    so the caller can clean it up on shutdown."""
-    root = Path(static_dir).expanduser().resolve()
+    so the caller can clean it up on shutdown. When ``static_dir`` is unset,
+    falls back to the frontend bundled in the package."""
+    root = (
+        Path(static_dir).expanduser().resolve()
+        if static_dir
+        else bundled_static_dir()
+    )
     if not (root / "index.html").is_file():
         raise FileNotFoundError(
             f"Presence static_dir has no index.html: {root}"

@@ -55,18 +55,18 @@ def run_daemon(slug: str) -> None:
         await telegram_worker.set_bot_commands(_app)
         sched.start()
         if presence_cfg.enabled:
-            if not presence_cfg.static_dir:
-                print("[daemon] presence: enabled but static_dir is unset — skipping.")
-            else:
-                try:
-                    presence_runner = await presence_server.start(
-                        slug, session, turn_lock,
-                        presence_cfg.address, presence_cfg.port,
-                        presence_cfg.static_dir,
-                    )
-                except Exception as e:
-                    # A broken presence config must not take down Telegram.
-                    print(f"[daemon] presence: failed to start ({e}).")
+            try:
+                # static_dir unset → presence_server falls back to the frontend
+                # bundled in the package, so any agent can enable Presence
+                # without keeping its own copy.
+                presence_runner = await presence_server.start(
+                    slug, session, turn_lock,
+                    presence_cfg.address, presence_cfg.port,
+                    presence_cfg.static_dir,
+                )
+            except Exception as e:
+                # A broken presence config must not take down Telegram.
+                print(f"[daemon] presence: failed to start ({e}).")
 
     async def _post_shutdown(_app):
         sched.shutdown()
